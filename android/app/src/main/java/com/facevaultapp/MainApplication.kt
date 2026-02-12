@@ -1,5 +1,8 @@
 package com.facevaultapp
 
+
+import com.stallion.Stallion
+
 import android.app.Application
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
@@ -13,10 +16,14 @@ class MainApplication : Application(), ReactApplication {
     getDefaultReactHost(
       context = applicationContext,
       packageList =
-        PackageList(this).packages.apply {
+        PackageList(this).packages, 
           // Packages that cannot be autolinked yet can be added manually here, for example:
           // add(MyReactNativePackage())
-        },
+           jsBundleFilePath = Stallion.getJSBundleFile(applicationContext)
+        
+       
+
+        
     )
   }
 

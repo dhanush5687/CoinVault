@@ -1,3 +1,8 @@
 <resources>
-    <string name="app_name">FaceVaultApp</string>
+    <!-- <string name="app_name">FaceVaultApp</string> -->
+   
+  <!-- make sure app token starts with spb_... and is 46 characters long -->
+  <string name="StallionProjectId">6975e4b87d451e0be884c960</string>
+  <string name="StallionAppToken">spb_yAqM9akUx5HHbsZfIY_oS20J99HHFjgRLFXHyXO7nS</string>
+  <string name="StallionPublicSigningKey">MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvaTJDGdoFwe7yWwZ0o5Q9vVOLQSv40TJi3ulu7IXhfCPWjo/5qqatj1yW1Q5xv09BdkoG5EsE7b5nqvkMXxIpQFDzxTkgqdawVBniNh2cSNV/ogTcYRUHb68rMD4GKVux8Jr5NEs8tUoSlGqaCHF1hClz2idKE21ejQ4MRGH6NWQ/77mutZ7AH4V2hkljysFM9zk2kB4D9y4pY9eA3mY8/bQo2Oy26fGtC7iWbbnpgkeh32J2NS8y7y/uYlA+B2c9hS+ETw7XHWl4QTOwKgMDfoecKY8vYDiwjnOIWMhEZEFpwvxFUgpO8sByvP5RaE6oAnvhbK4/uQ+Ijc3kR5yFQIDAQAB</string>
 </resources>

@@ -1,0 +1,8 @@
+npm i react-native-stallion  
+npm i --save-dev stallion-cli
+npx stallion login       
+npx stallion publish-bundle --upload-path=rappletech69/facevaultapp/main --platform=android --release-note="this is test release "
+
+replece path  rappletech69/facevaultapp/main this to new path 
+
+rappletech/indianiptv/iptv

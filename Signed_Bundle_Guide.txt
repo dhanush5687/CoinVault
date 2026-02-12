@@ -1,0 +1,65 @@
+# FaceVaultApp Production Build & OTA Guide (SIGNED)
+
+This guide contains the exact commands to generate cryptographically SIGNED assets for your application. Signing is required for your app to accept updates and for Play Store acceptance.
+
+---
+
+## 1. SIGNED Stallion OTA Update (Over-the-Air)
+You MUST include the `--private-key` for the update to be verified by your app.
+
+**FULL COMMAND:**
+```bash
+npx stallion publish-bundle --upload-path=rappletech69/facevaultapp/main --private-key=stallion/secret-keys/private-key.pem --platform=android --release-note="Your update message"
+```
+
+**NPM SHORTCUT:**
+```bash
+npm run ota
+```
+
+---
+
+## 2. SIGNED Production APK (For Direct Install)
+This generates a single, universal APK signed with your `CoinVault.jks` keystore.
+
+**FULL COMMAND:**
+```bash
+npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output android/app/src/main/assets/index.android.bundle --assets-dest android/app/src/main/res && cd android && ./gradlew assembleRelease
+```
+
+**NPM SHORTCUT:**
+```bash
+npm run android-build-release
+```
+**Output Location:** `android/app/build/outputs/apk/release/app-release.apk`
+
+---
+
+## 3. SIGNED Production AAB (For Google Play Store)
+This generates the Google Play Bundle file required for the Play Console.
+
+**FULL COMMAND:**
+```bash
+cd android && ./gradlew bundleRelease
+```
+
+**NPM SHORTCUT:**
+```bash
+npm run aab
+```
+**Output Location:** `android/app/build/outputs/bundle/release/app-release.aab`
+
+---
+
+## 🔑 Security Details
+*   **Stallion Key:** Uses `stallion/secret-keys/private-key.pem`
+*   **Android Key:** Uses `android/app/CoinVault.jks`
+*   **Verification:** Your app is already configured to check signatures using the Public Key stored in `strings.xml` and `Info.plist`.
+
+---
+
+## 💡 Troubleshooting
+If you get a signing error, ensure your `.env` file has these correct passwords:
+- `RELEASE_STORE_PASSWORD=123456`
+- `RELEASE_KEY_ALIAS=android`
+- `RELEASE_KEY_PASSWORD=123456`

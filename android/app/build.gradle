@@ -1,6 +1,23 @@
 apply plugin: "com.android.application"
+apply from: "../../node_modules/react-native-vector-icons/fonts.gradle"
+
+// Read .env file
+def env = [:]
+def envFile = file("../../.env")
+if (envFile.exists()) {
+    envFile.eachLine { line ->
+        if (line && !line.startsWith("#")) {
+            def parts = line.split("=", 2)
+            if (parts.length == 2) {
+                env[parts[0].trim()] = parts[1].trim()
+            }
+        }
+    }
+}
+
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+apply plugin: 'com.google.gms.google-services'
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -57,7 +74,14 @@ react {
 /**
  * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
  */
-def enableProguardInReleaseBuilds = false
+def enableProguardInReleaseBuilds = true
+
+/**
+ * Set this to true to generate an APK that only contains code and resources Specific
+ * to a particular CPU architecture. This results in an APK that is about 1/4 the size
+ * of the default "universal" APK.
+ */
+def enableSeparateBuildPerCPUArchitecture = false
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -77,14 +101,25 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.facevaultapp"
+    namespace env.get("PACKAGE_NAME", "com.facevaultapp")
     defaultConfig {
-        applicationId "com.facevaultapp"
+        applicationId env.get("PACKAGE_NAME", "com.facevaultapp")
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "1.0"
+        versionName env.get("VERSION_NAME", "1.0")
+        resValue "string", "app_name", env.get("APP_NAME", "FaceVaultApp")
     }
+
+    splits {
+        abi {
+            reset()
+            enable enableSeparateBuildPerCPUArchitecture
+            universalApk true  // If true, also generate a universal APK
+            include "armeabi-v7a", "x86", "arm64-v8a", "x86_64"
+        }
+    }
+
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -92,16 +127,21 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            storeFile file('CoinVault.jks')
+            storePassword env.get("RELEASE_STORE_PASSWORD", "123456")
+            keyAlias env.get("RELEASE_KEY_ALIAS", "android")
+            keyPassword env.get("RELEASE_KEY_PASSWORD", "123456")
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
+            shrinkResources true
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }

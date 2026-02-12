@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "112019696129",
+    "firebase_url": "https://facevaultapp-bb50e-default-rtdb.firebaseio.com",
+    "project_id": "facevaultapp-bb50e",
+    "storage_bucket": "facevaultapp-bb50e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:112019696129:android:2fac7df641b7c45e4aae00",
+        "android_client_info": {
+          "package_name": "com.facevaultapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "112019696129-o3g2t3bggihcqrm34vqv7l4g0bhhmerr.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.facevaultapp",
+            "certificate_hash": "f97d7ed3534f02839b65e1393292af2063b95251"
+          }
+        },
+        {
+          "client_id": "112019696129-bl64rll6uipl425llp552ujda2f2ffq6.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAdu_QnBSnyokG8AvQrTlUrpZNkNxIWfXk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "112019696129-bl64rll6uipl425llp552ujda2f2ffq6.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

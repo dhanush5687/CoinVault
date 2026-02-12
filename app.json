@@ -1,4 +1,8 @@
 {
   "name": "FaceVaultApp",
-  "displayName": "FaceVaultApp"
+  "displayName": "FaceVaultApp",
+  "react-native-google-mobile-ads": {
+    "android_app_id": "ca-app-pub-2490251867268823~7957128323"
+    
+  }
 }
