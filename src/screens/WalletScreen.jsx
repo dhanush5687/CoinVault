@@ -11,6 +11,7 @@ import {
   RefreshControl,
   Modal,
   ScrollView,
+  ActivityIndicator,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../config/supabase";
@@ -36,6 +37,7 @@ export default function WalletScreen() {
   const [mobile, setMobile] = useState("");
   const [upi, setUpi] = useState("");
   const [loading, setLoading] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState(null);
 
   useEffect(() => {
     fetchWalletData();
@@ -46,6 +48,7 @@ export default function WalletScreen() {
     useCallback(() => {
       showAppOpenAd();
       fetchWalletData();
+      syncWithdrawStatus();
     }, [])
   );
 
@@ -82,13 +85,33 @@ export default function WalletScreen() {
         .order("created_at", { ascending: false });
 
       if (transactions) {
+        // 3. Fetch current status from Firebase to ensure real-time accuracy for user
+        const fbSnap = await database().ref("/withdraw_requests")
+          .orderByChild("userId")
+          .equalTo(user.id)
+          .once("value");
+        const fbData = fbSnap.val() || {};
+
         // Map to expected UI format
         const formattedHistory = transactions.map(t => {
           let status = "Completed";
           let rejectReason = null;
-          if (t.transaction_type === "Withdrawal" && t.metadata && t.metadata.status) {
+          let utrId = t.metadata?.utrId;
+          let paidAt = t.metadata?.paidAt;
+
+          // Merge Firebase Status if available (it has the latest "Paid" update from Admin)
+          const fbMatch = fbData[t.id];
+          if (fbMatch) {
+            status = fbMatch.status || "Pending";
+            rejectReason = fbMatch.rejectReason || null;
+            utrId = fbMatch.utrId || utrId;
+            paidAt = fbMatch.paidAt || paidAt;
+          } else if (t.transaction_type === "Withdrawal" && t.metadata && t.metadata.status) {
             status = t.metadata.status;
             rejectReason = t.metadata.rejectReason;
+          } else if (t.transaction_type === "Refund") {
+            status = "Refunded";
+            rejectReason = t.metadata?.reason;
           }
 
           return {
@@ -97,10 +120,14 @@ export default function WalletScreen() {
             coins: parseFloat(t.amount),
             status: status,
             rejectReason: rejectReason,
+            utrId: utrId,
+            paidAt: paidAt,
             date: new Date(t.created_at).toLocaleString(),
           };
         });
         setHistory(formattedHistory);
+        // Persist for offline view
+        await AsyncStorage.setItem("COIN_HISTORY", JSON.stringify(formattedHistory));
       }
     } catch (e) {
       console.log("Supabase Wallet Fetch Error:", e);
@@ -116,29 +143,45 @@ export default function WalletScreen() {
 
   // 🔥 Sync withdraw status + auto delete if admin removes
   const syncWithdrawStatus = async () => {
+    const database = require("@react-native-firebase/database").default;
     const local = await AsyncStorage.getItem("COIN_HISTORY");
     if (!local) return;
 
     let list = JSON.parse(local);
 
     list.forEach((item) => {
-      if (item.type === "Withdraw" && item.id) {
+      // Listen for updates on any withdrawal category
+      if (item.id && (item.type === "Withdrawal" || item.type === "Withdraw")) {
         const ref = database().ref(`/withdraw_requests/${item.id}`);
         ref.off();
 
         ref.on("value", async (snap) => {
           if (snap.exists()) {
             const data = snap.val();
-            list = list.map((h) =>
-              h.id === item.id ? { ...h, status: data.status } : h
-            );
-          } else {
-            // Admin deleted → remove from user history
-            list = list.filter((h) => h.id !== item.id);
-          }
+            // Updatelist with new status if it changed
+            let updated = false;
+            const newList = list.map((h) => {
+              if (h.id === item.id && h.status !== data.status) {
+                updated = true;
+                return { ...h, status: data.status, type: "Withdrawal" };
+              }
+              return h;
+            });
 
-          await AsyncStorage.setItem("COIN_HISTORY", JSON.stringify(list));
-          setHistory([...list]);
+            if (updated) {
+              list = newList;
+              setHistory([...list]);
+              await AsyncStorage.setItem("COIN_HISTORY", JSON.stringify(list));
+            }
+          } else {
+            // Admin deleted → remove from history
+            const newList = list.filter((h) => h.id !== item.id);
+            if (newList.length !== list.length) {
+              list = newList;
+              setHistory([...list]);
+              await AsyncStorage.setItem("COIN_HISTORY", JSON.stringify(list));
+            }
+          }
         });
       }
     });
@@ -262,20 +305,31 @@ export default function WalletScreen() {
   };
 
   const renderItem = ({ item }) => (
-    <View style={styles.historyItem}>
-      <View>
+    <TouchableOpacity 
+      style={styles.historyItem} 
+      onPress={() => {
+        if (item.type === "Withdrawal") {
+          setSelectedTransaction(item);
+        }
+      }}
+    >
+      <View style={{ flex: 1 }}>
         <Text style={styles.historyType}>{item.type}</Text>
         <Text style={styles.historyDate}>{item.date}</Text>
-        {item.type === "Withdrawal" && (
-          <View>
+        
+        {/* Prominent status for any Withdrawal category */}
+        {item.type?.toLowerCase().includes("withdraw") && (
+          <View style={{ marginTop: 4 }}>
             <Text
               style={{
-                color: item.status === "Paid" ? "#22c55e" : (item.status === "Rejected" ? "#ef4444" : "#facc15"),
+                color: item.status === "Paid" ? "#22c55e" : 
+                       (item.status === "Refunded" || item.status === "Rejected" ? "#ef4444" : "#facc15"),
                 fontSize: 12,
-                fontWeight: "600"
+                fontWeight: "900",
+                textTransform: "uppercase",
               }}
             >
-              {item.status}
+              • {item.status}
             </Text>
             {item.rejectReason && (
               <Text style={{ color: "#ef4444", fontSize: 11, fontWeight: "700", marginTop: 2 }}>
@@ -284,8 +338,20 @@ export default function WalletScreen() {
             )}
           </View>
         )}
+
+        {/* Status for Refund category */}
+        {item.type === "Refund" && (
+          <View style={{ marginTop: 4 }}>
+            <Text style={{ color: "#38bdf8", fontSize: 12, fontWeight: "700" }}>
+              • REFUNDED
+            </Text>
+            {item.rejectReason && (
+              <Text style={{ color: "#9ca3af", fontSize: 11 }}>Reason: {item.rejectReason}</Text>
+            )}
+          </View>
+        )}
       </View>
-      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      <View style={{ alignItems: "flex-end", justifyContent: "center" }}>
         <Text
           style={[
             styles.historyCoins,
@@ -297,7 +363,7 @@ export default function WalletScreen() {
         </Text>
         <MaterialCommunityIcons name="database-arrow-up" size={16} color={item.coins > 0 ? "#22c55e" : "#ef4444"} style={{ marginLeft: 4 }} />
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   return (
@@ -381,8 +447,16 @@ export default function WalletScreen() {
                 style={styles.input}
               />
 
-              <TouchableOpacity style={styles.withdrawBtn} onPress={withdraw}>
-                <Text style={styles.withdrawText}>Submit Withdraw</Text>
+              <TouchableOpacity 
+                style={[styles.withdrawBtn, loading && { opacity: 0.7 }]} 
+                onPress={withdraw}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#000" />
+                ) : (
+                  <Text style={styles.withdrawText}>Submit Withdraw</Text>
+                )}
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -392,6 +466,73 @@ export default function WalletScreen() {
                 <Text style={{ color: "#fff" }}>Cancel</Text>
               </TouchableOpacity>
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Withdrawal Detail Modal */}
+      <Modal transparent animationType="fade" visible={!!selectedTransaction}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.detailBox}>
+            <Text style={styles.detailTitle}>Withdrawal Details</Text>
+            
+            {selectedTransaction && (
+              <View style={{ marginVertical: 15 }}>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Status:</Text>
+                  <Text style={[styles.detailValue, { 
+                    color: 
+                      selectedTransaction.status === "Paid" ? "#22c55e" : 
+                      selectedTransaction.status === "Refunded" ? "#38bdf8" : 
+                      (selectedTransaction.status === "Rejected" ? "#ef4444" : "#facc15")
+                  }]}>
+                    {selectedTransaction.status}
+                  </Text>
+                </View>
+
+                {selectedTransaction.status === "Paid" && (
+                  <>
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Paid At:</Text>
+                      <Text style={styles.detailValue}>
+                        {selectedTransaction.paidAt ? new Date(selectedTransaction.paidAt).toLocaleString() : "N/A"}
+                      </Text>
+                    </View>
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>UTR ID:</Text>
+                      <Text style={[styles.detailValue, { color: "#38bdf8", fontWeight: "bold" }]}>
+                        {selectedTransaction.utrId || "Processing"}
+                      </Text>
+                    </View>
+                  </>
+                )}
+
+                {(selectedTransaction.status === "Rejected" || selectedTransaction.status === "Refunded") && (
+                  <View style={styles.detailRowVertical}>
+                    <Text style={styles.detailLabel}>Reason:</Text>
+                    <Text style={[styles.rejectText, selectedTransaction.status === "Refunded" && { color: "#38bdf8", borderColor: "#1e3a8a" }]}>
+                      {selectedTransaction.rejectReason || "Invalid payment details"}
+                    </Text>
+                  </View>
+                )}
+
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Amount:</Text>
+                  <Text style={styles.detailValue}>{Math.abs(selectedTransaction.coins)} 🪙 (₹{(Math.abs(selectedTransaction.coins) * 0.01).toFixed(2)})</Text>
+                </View>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Date:</Text>
+                  <Text style={styles.detailValue}>{selectedTransaction.date}</Text>
+                </View>
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={styles.closeBtn}
+              onPress={() => setSelectedTransaction(null)}
+            >
+              <Text style={{ color: "#fff", fontWeight: "700" }}>Close</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -489,6 +630,57 @@ const styles = StyleSheet.create({
   cancelBtn: {
     backgroundColor: "#ef4444",
     padding: 10,
+    borderRadius: 10,
+    alignItems: "center",
+    marginTop: 10,
+  },
+
+  detailBox: {
+    backgroundColor: "#111827",
+    padding: 20,
+    borderRadius: 15,
+    width: "85%",
+    borderWidth: 1,
+    borderColor: "#1f2937",
+  },
+  detailTitle: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: 5,
+  },
+  detailRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginVertical: 6,
+  },
+  detailRowVertical: {
+    marginVertical: 8,
+  },
+  detailLabel: {
+    color: "#9ca3af",
+    fontSize: 14,
+  },
+  detailValue: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  rejectText: {
+    color: "#ef4444",
+    fontSize: 14,
+    fontWeight: "600",
+    marginTop: 4,
+    backgroundColor: "#1a1523",
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#451a1a",
+  },
+  closeBtn: {
+    backgroundColor: "#374151",
+    padding: 12,
     borderRadius: 10,
     alignItems: "center",
     marginTop: 10,

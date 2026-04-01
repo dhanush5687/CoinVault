@@ -217,6 +217,88 @@ export default function AdminPanelScreen({ navigation }) {
                     text: modalValue
                 });
                 Alert.alert("Success", "Message updated");
+            } else if (modalType === "utr") {
+                // Mark as Paid with UTR
+                await database().ref(`/withdraw_requests/${currentEditItem.id}`).update({ 
+                    status: "Paid", 
+                    utrId: modalValue,
+                    paidAt: new Date().toISOString() 
+                });
+
+                const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(currentEditItem.id);
+                if (isUUID) {
+                    await supabase
+                        .from("wallet_transactions")
+                        .update({ 
+                            metadata: { 
+                                ...currentEditItem, 
+                                userCurrentBalance: undefined, 
+                                status: "Paid",
+                                utrId: modalValue,
+                                paidAt: new Date().toISOString()
+                            } 
+                        })
+                        .eq("id", currentEditItem.id);
+                }
+                Alert.alert("Success", "Request marked as Paid with UTR");
+            } else if (modalType === "reject") {
+                // Mark as Refunded with Reason (Wrong Details)
+                const statusUpdate = "Refunded";
+                const reasonDetail = modalValue;
+                const targetUserId = currentEditItem.userId;
+                const refundAmount = parseInt(currentEditItem.coins || 0);
+
+                if (!targetUserId) {
+                    Alert.alert("Error", "User ID not found in request");
+                    return;
+                }
+
+                // 1. Update Request Status in Firebase
+                await database().ref(`/withdraw_requests/${currentEditItem.id}`).update({
+                    status: statusUpdate,
+                    rejectReason: reasonDetail
+                });
+
+                // 2. Refund Coins in Firebase Wallet
+                const walletRef = database().ref(`/wallets/${targetUserId}`);
+                const walletSnap = await walletRef.once("value");
+                let currentBalance = 0;
+                if (walletSnap.exists()) {
+                    currentBalance = parseInt(walletSnap.val().balance || 0);
+                }
+                const newBalance = currentBalance + refundAmount;
+                await walletRef.update({
+                    balance: newBalance,
+                    lastUpdated: Date.now()
+                });
+
+                // 3. Sync to Supabase
+                const isUUIDUser = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUserId);
+                if (isUUIDUser) {
+                    await supabase.from("profiles").update({ wallet_balance: newBalance }).eq("id", targetUserId);
+                    await supabase.from("wallet_transactions").insert([{
+                        user_id: targetUserId,
+                        transaction_type: "Refund",
+                        amount: refundAmount,
+                        balance_after: newBalance,
+                        description: `Refund: ${reasonDetail} (Req #${currentEditItem.id.slice(0, 6)})`,
+                        metadata: { originalId: currentEditItem.id, reason: reasonDetail }
+                    }]);
+
+                    await supabase.from("wallet_transactions")
+                        .update({
+                            metadata: {
+                                ...currentEditItem,
+                                userCurrentBalance: undefined,
+                                status: statusUpdate,
+                                paidAt: undefined,
+                                utrId: undefined,
+                                rejectReason: reasonDetail
+                            }
+                        })
+                        .eq("id", currentEditItem.id);
+                }
+                Alert.alert("Success", "Request rejected and coins refunded");
             }
 
             setModalVisible(false);
@@ -227,108 +309,28 @@ export default function AdminPanelScreen({ navigation }) {
     };
 
     const handleMarkAsPaid = (item) => {
-        Alert.alert("Confirm Payment", `Mark Request for ${item.name} as PAID?`, [
-            { text: "Cancel", style: "cancel" },
-            {
-                text: "Yes, PAID",
-                onPress: async () => {
-                    try {
-                        // 1. Update Firebase (for Admin Dashboard)
-                        await database().ref(`/withdraw_requests/${item.id}`).update({ status: "Paid" });
-
-                        // 2. Update Supabase (only if ID is a valid UUID)
-                        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.id);
-                        if (isUUID) {
-                            const { error } = await supabase
-                                .from("wallet_transactions")
-                                .update({ metadata: { ...item, userCurrentBalance: undefined, status: "Paid" } })
-                                .eq("id", item.id);
-
-                            if (error) console.error("Supabase Paid Sync Error:", error.message);
-                        }
-
-                        fetchData();
-                    } catch (e) {
-                        Alert.alert("Fail", "Update failed");
-                    }
-                },
-            },
-        ]);
+        handleOpenModal("utr", "Enter UTR ID", "", item);
     };
 
     const handleMarkWrongDetails = (item) => {
-        Alert.alert("Wrong Details", `Reject ${item.name || 'this request'} due to invalid payment details?\n\nCoins will be refunded to user.`, [
+        handleOpenModal("reject", "Rejection Reason", "Invalid Details", item);
+    };
+
+    const handleDeleteRequest = (item) => {
+        Alert.alert("Delete Request", "Remove this withdrawal record?", [
             { text: "Cancel", style: "cancel" },
             {
-                text: "Yes, Reject & Refund",
+                text: "Delete",
+                style: "destructive",
                 onPress: async () => {
                     try {
-                        const statusUpdate = "Rejected";
-                        const reasonDetail = "Invalid Details";
-                        const targetUserId = item.userId;
-                        const refundAmount = parseInt(item.coins || 0);
-
-                        if (!targetUserId) {
-                            Alert.alert("Error", "User ID not found in request");
-                            return;
-                        }
-
-                        // 1. Update Request Status in Firebase
-                        await database().ref(`/withdraw_requests/${item.id}`).update({
-                            status: statusUpdate,
-                            rejectReason: reasonDetail
-                        });
-
-                        // 2. Refund Coins in Firebase Wallet
-                        const walletRef = database().ref(`/wallets/${targetUserId}`);
-                        const walletSnap = await walletRef.once("value");
-                        let currentBalance = 0;
-                        if (walletSnap.exists()) {
-                            currentBalance = parseInt(walletSnap.val().balance || 0);
-                        }
-                        const newBalance = currentBalance + refundAmount;
-                        await walletRef.update({
-                            balance: newBalance,
-                            lastUpdated: Date.now()
-                        });
-
-                        // 3. Sync to Supabase
-                        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUserId);
-                        if (isUUID) {
-                            // Update Supabase Wallet
-                            await supabase.from("profiles").update({ wallet_balance: newBalance }).eq("id", targetUserId);
-
-                            // Create Refund Entry
-                            await supabase.from("wallet_transactions").insert([{
-                                user_id: targetUserId,
-                                transaction_type: "Refund",
-                                amount: refundAmount,
-                                balance_after: newBalance,
-                                description: `Refund: ${reasonDetail} (Req #${item.id.slice(0, 6)})`,
-                                metadata: { originalId: item.id, reason: reasonDetail }
-                            }]);
-
-                            // Mark original transaction as Rejected
-                            await supabase.from("wallet_transactions")
-                                .update({
-                                    metadata: {
-                                        ...item,
-                                        userCurrentBalance: undefined,
-                                        status: statusUpdate,
-                                        rejectReason: reasonDetail
-                                    }
-                                })
-                                .eq("id", item.id);
-                        }
-
-                        Alert.alert("Success", "Request rejected and coins refunded");
+                        await database().ref(`/withdraw_requests/${item.id}`).remove();
                         fetchData();
                     } catch (e) {
-                        console.error("Refund Error:", e);
-                        Alert.alert("Error", "Refund failed: " + e.message);
+                        Alert.alert("Error", "Delete failed");
                     }
-                },
-            },
+                }
+            }
         ]);
     };
 
