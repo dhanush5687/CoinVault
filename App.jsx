@@ -65,8 +65,6 @@
 import React, { useEffect } from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { Linking } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { withStallion } from 'react-native-stallion';
 
 // 🔥 Ads
@@ -112,6 +110,18 @@ function App() {
         };
         initAds();
 
+        // 🔥 Firebase Auth Listener
+        const { auth } = require("@react-native-firebase/auth");
+        const onAuthStateChanged = (user) => {
+            if (user) {
+                console.log("🔥 Firebase User Session:", user.uid, user.isAnonymous ? "(Anonymous)" : "");
+            } else {
+                console.log("❄️ No Firebase Session");
+            }
+        };
+
+        const subscriber = auth().onAuthStateChanged(onAuthStateChanged);
+
         // Show AppOpen on App Foreground
         const { AppState } = require("react-native");
         const subscription = AppState.addEventListener("change", (nextAppState) => {
@@ -143,6 +153,7 @@ function App() {
         }, 10 * 60 * 1000); // 10 Minutes
 
         return () => {
+            subscriber(); // 🔥 Unsubscribe from Firebase Auth
             subscription.remove();
             clearTimeout(reviewTimeout);
         };

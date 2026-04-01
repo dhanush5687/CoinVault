@@ -91,6 +91,23 @@ export default function HomeScreen({ navigation }) {
                     .update({ last_login: new Date().toISOString() })
                     .eq("id", user.id);
 
+                // 🚀 SYNC TO FIREBASE (Ensure Admin Panel has latest data)
+                try {
+                    const database = require("@react-native-firebase/database").default;
+                    await database().ref(`/users/${user.id}`).update({
+                        name: profile.display_name || "No Name",
+                        mobile: profile.mobile || "N/A",
+                        upi: profile.upi || "N/A",
+                        email: user.email || "N/A",
+                        image: profile.avatar_data || "",
+                        referralCode: profile.referral_code || "",
+                        referredBy: profile.referred_by || "",
+                        lastLogin: new Date().toISOString()
+                    });
+                } catch (fbErr) {
+                    console.log("Home Firebase Sync Error:", fbErr);
+                }
+
                 // Check Completion
                 const isComplete = !!(
                     profile.display_name &&

@@ -36,6 +36,8 @@ export default function WalletScreen() {
   const [mobile, setMobile] = useState("");
   const [upi, setUpi] = useState("");
   const [loading, setLoading] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState(null);
+  const [detailsModalVisible, setDetailsModalVisible] = useState(false);
 
   useEffect(() => {
     fetchWalletData();
@@ -83,12 +85,44 @@ export default function WalletScreen() {
 
       if (transactions) {
         // Map to expected UI format
-        const formattedHistory = transactions.map(t => {
+        const formattedHistory = await Promise.all(transactions.map(async (t) => {
           let status = "Completed";
           let rejectReason = null;
-          if (t.transaction_type === "Withdrawal" && t.metadata && t.metadata.status) {
-            status = t.metadata.status;
-            rejectReason = t.metadata.rejectReason;
+
+          if (t.transaction_type === "Withdrawal") {
+            // 1. Default from Supabase Metadata
+            if (t.metadata && t.metadata.status) {
+              status = t.metadata.status;
+              rejectReason = t.metadata.rejectReason;
+            } else {
+              status = "Pending"; // Default if missing
+            }
+
+            // 2. Cross-check Firebase for authoritative status (Source of Truth for Admin)
+            // This handles cases where Supabase update failed (e.g. RLS) but Firebase updated successfully
+            if (status === "Pending") {
+              try {
+                const fbSnap = await database().ref(`/withdraw_requests/${t.id}/status`).once('value');
+                if (fbSnap.exists()) {
+                  status = fbSnap.val();
+                  // Also check for reason if rejected
+                  if (status === "Rejected") {
+                    const reasonSnap = await database().ref(`/withdraw_requests/${t.id}/rejectReason`).once('value');
+                    if (reasonSnap.exists()) rejectReason = reasonSnap.val();
+                  }
+
+                  // Check for paidAt if paid
+                  if (status === "Paid") {
+                    const metaSnap = await database().ref(`/withdraw_requests/${t.id}`).once('value');
+                    if (metaSnap.exists() && metaSnap.val().paidAt) {
+                      // Although we don't strictly need it here if we just use current date, but let's try to get it
+                    }
+                  }
+                }
+              } catch (e) {
+                console.log("Firebase Check Error:", e);
+              }
+            }
           }
 
           return {
@@ -97,9 +131,17 @@ export default function WalletScreen() {
             coins: parseFloat(t.amount),
             status: status,
             rejectReason: rejectReason,
+            rejectReason: rejectReason,
             date: new Date(t.created_at).toLocaleString(),
+            // Pass extra metadata for details modal
+            details: {
+              name: t.metadata?.name || "N/A",
+              mobile: t.metadata?.mobile || "N/A",
+              upi: t.metadata?.upi || "N/A",
+              paidAt: t.metadata?.paidAt ? new Date(t.metadata.paidAt).toLocaleString() : null
+            }
           };
-        });
+        }));
         setHistory(formattedHistory);
       }
     } catch (e) {
@@ -261,8 +303,13 @@ export default function WalletScreen() {
     }
   };
 
+  const handleItemPress = (item) => {
+    setSelectedTransaction(item);
+    setDetailsModalVisible(true);
+  };
+
   const renderItem = ({ item }) => (
-    <View style={styles.historyItem}>
+    <TouchableOpacity style={styles.historyItem} onPress={() => handleItemPress(item)}>
       <View>
         <Text style={styles.historyType}>{item.type}</Text>
         <Text style={styles.historyDate}>{item.date}</Text>
@@ -297,7 +344,7 @@ export default function WalletScreen() {
         </Text>
         <MaterialCommunityIcons name="database-arrow-up" size={16} color={item.coins > 0 ? "#22c55e" : "#ef4444"} style={{ marginLeft: 4 }} />
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   return (
@@ -400,6 +447,74 @@ export default function WalletScreen() {
       <View style={{ alignItems: "center", marginTop: 5 }}>
         <BannerAd unitId={ADMOB_BANNER_ID} size={BannerAdSize.ADAPTIVE_BANNER} />
       </View>
+      {/* Transaction Details Modal */}
+      <Modal transparent animationType="fade" visible={detailsModalVisible} onRequestClose={() => setDetailsModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.detailsModalBox}>
+            <Text style={styles.modalTitle}>Transaction Details</Text>
+
+            {selectedTransaction && (
+              <View style={{ marginTop: 15 }}>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Type:</Text>
+                  <Text style={styles.detailValue}>{selectedTransaction.type}</Text>
+                </View>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Status:</Text>
+                  <Text style={[styles.detailValue, { color: selectedTransaction.status === "Paid" ? "#22c55e" : (selectedTransaction.status === "Rejected" ? "#ef4444" : "#facc15") }]}>
+                    {selectedTransaction.status}
+                  </Text>
+                </View>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Amount:</Text>
+                  <Text style={[styles.detailValue, { color: '#ef4444' }]}>{Math.abs(selectedTransaction.coins)} Coins</Text>
+                </View>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Date:</Text>
+                  <Text style={styles.detailValue}>{selectedTransaction.date}</Text>
+                </View>
+
+                {selectedTransaction.type === "Withdrawal" && selectedTransaction.details && (
+                  <>
+                    <View style={styles.divider} />
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Name:</Text>
+                      <Text style={styles.detailValue}>{selectedTransaction.details.name}</Text>
+                    </View>
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Mobile:</Text>
+                      <Text style={styles.detailValue}>{selectedTransaction.details.mobile}</Text>
+                    </View>
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>UPI ID:</Text>
+                      <Text style={styles.detailValue}>{selectedTransaction.details.upi}</Text>
+                    </View>
+
+                    {selectedTransaction.status === "Rejected" && selectedTransaction.rejectReason && (
+                      <View style={[styles.detailRow, { marginTop: 10 }]}>
+                        <Text style={[styles.detailLabel, { color: '#ef4444' }]}>Reason:</Text>
+                        <Text style={[styles.detailValue, { color: '#ef4444' }]}>{selectedTransaction.rejectReason}</Text>
+                      </View>
+                    )}
+
+                    {selectedTransaction.status === "Paid" && selectedTransaction.details.paidAt && (
+                      <View style={[styles.detailRow, { marginTop: 10 }]}>
+                        <Text style={[styles.detailLabel, { color: '#22c55e' }]}>Paid At:</Text>
+                        <Text style={[styles.detailValue, { color: '#22c55e' }]}>{selectedTransaction.details.paidAt}</Text>
+                      </View>
+                    )}
+                  </>
+                )}
+              </View>
+            )}
+
+            <TouchableOpacity style={styles.withdrawBtn} onPress={() => setDetailsModalVisible(false)}>
+              <Text style={styles.withdrawText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -461,6 +576,36 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     width: "90%",
+  },
+  detailsModalBox: {
+    backgroundColor: "#1e293b",
+    padding: 20,
+    borderRadius: 16,
+    width: "85%",
+    borderWidth: 1,
+    borderColor: "#334155"
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8
+  },
+  detailLabel: {
+    color: "#94a3b8",
+    fontWeight: "600",
+    fontSize: 14
+  },
+  detailValue: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 14,
+    textAlign: 'right',
+    maxWidth: '60%'
+  },
+  divider: {
+    height: 1,
+    backgroundColor: "#334155",
+    marginVertical: 12
   },
   modalTitle: {
     color: "#22c55e",

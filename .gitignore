@@ -76,3 +76,11 @@ yarn-error.log
 
 # Stallion 
 stallion/secret-keys/
+
+# Sensitive Files
+.env
+google-services.json
+GoogleService-Info.plist
+firebase.json
+database.rules.json
+.firebaserc

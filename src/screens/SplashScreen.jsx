@@ -87,7 +87,7 @@ export default function SplashScreen({ navigation }) {
                 <View style={styles.logoCircle}>
                     <Text style={{ fontSize: 60 }}>💰</Text>
                 </View>
-                <Text style={styles.title}>FACE VAULT</Text>
+                <Text style={styles.title}>Coin Vault</Text>
                 <Text style={styles.subtitle}>Earning Made Simple</Text>
             </Animated.View>
         </View>

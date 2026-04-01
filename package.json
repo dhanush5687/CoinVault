@@ -28,7 +28,8 @@
     "emu-36": "emulator -avd Pixel_7_Pro_API_36",
     "studio": "open -a \"Android Studio\"",
     "gerror": "rm -rf android/.gradle android/build android/app/build && cd android && ./gradlew clean && cd .. && npx react-native run-android",
-    "ota": "npx stallion publish-bundle --upload-path=rappletech69/facevaultapp/main --private-key=stallion/secret-keys/private-key.pem --platform=android --release-note=\"new adds updated and ap chat and fix bugs\""
+    "ota": "npx stallion publish-bundle --upload-path=rappletech69/facevaultapp/main --private-key=stallion/secret-keys/private-key.pem --platform=android --release-note=\"new adds updated and ap chat and fix bugs\"",
+    "build-release-ota": "./build-release-ota.sh"
   },
   "dependencies": {
     "@lottiefiles/lottie-player": "^2.0.12",

@@ -16,16 +16,38 @@ export default function StallionUpdateModal() {
 
     useEffect(() => {
         // Force a sync check on mount
-        sync();
+        console.log("🔄 Stallion: Checking for updates on mount...");
+        try {
+            sync();
+            console.log("✅ Stallion: Sync initiated");
+        } catch (err) {
+            console.log("❌ Stallion: Sync error:", err);
+        }
+
+        // Check for updates periodically (every 5 minutes)
+        const interval = setInterval(() => {
+            console.log("🔄 Stallion: Periodic update check...");
+            try {
+                sync();
+                console.log("✅ Stallion: Periodic sync initiated");
+            } catch (err) {
+                console.log("❌ Stallion: Periodic sync error:", err);
+            }
+        }, 5 * 60 * 1000); // 5 minutes
+
+        return () => clearInterval(interval);
     }, []);
 
     useEffect(() => {
         if (isRestartRequired) {
+            console.log("🚀 Stallion: Update available! Showing modal...");
+            console.log("📦 New bundle:", newReleaseBundle);
             setVisible(true);
         } else {
             setVisible(false);
         }
-    }, [isRestartRequired]);
+    }, [isRestartRequired, newReleaseBundle]);
+
 
     const handleRestart = () => {
         restart();
