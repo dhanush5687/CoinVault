@@ -63,8 +63,7 @@
     "react-native-screens": "^4.20.0",
     "react-native-stallion": "^2.3.2",
     "react-native-url-polyfill": "^3.0.0",
-    "react-native-vector-icons": "^10.3.0",
-    "react-native-vision-camera": "^4.7.3"
+    "react-native-vector-icons": "^10.3.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
