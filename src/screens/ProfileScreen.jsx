@@ -23,7 +23,7 @@ import { deleteAccount, updateUserProfile, signOut, syncUserActivity } from "../
 
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { BannerAd, BannerAdSize } from "react-native-google-mobile-ads";
-import { ADMOB_BANNER_ID } from "@env";
+import { ADMOB_BANNER_ID, VERSION_NAME } from "@env";
 import { showAppOpenAd } from "../ads/AppOpenManager";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback } from "react";
@@ -379,6 +379,8 @@ export default function ProfileScreen({ navigation }) {
                         <Text style={[styles.logoutText, { color: '#ef4444', fontSize: 13 }]}>Delete Account Permanently</Text>
                     </View>
                 </TouchableOpacity>
+
+                <Text style={styles.versionText}>App Version {VERSION_NAME}</Text>
             </View>
 
             {/* Bottom Banner */}
@@ -583,5 +585,10 @@ const styles = StyleSheet.create({
         color: '#38bdf8',
         fontSize: 16,
         fontWeight: '700',
+    },
+    versionText: {
+        color: '#64748b',
+        fontSize: 12,
+        marginTop: 20,
     },
 });

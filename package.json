@@ -28,9 +28,10 @@
     "emu-36": "emulator -avd Pixel_7_Pro_API_36",
     "studio": "open -a \"Android Studio\"",
     "gerror": "rm -rf android/.gradle android/build android/app/build && cd android && ./gradlew clean && cd .. && npx react-native run-android",
-    "ota": "npx stallion publish-bundle --upload-path=rappletech69/facevaultapp/main --private-key=stallion/secret-keys/private-key.pem --platform=android --release-note=\"new adds updated and ap chat and fix bugs\""
+    "ota": "HOT_UPDATER_SUPABASE_URL=https://uwpnfnwqluxhzlnewcgp.supabase.co HOT_UPDATER_SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV3cG5mbndxbHV4aHpsbmV3Y2dwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDE5MzY3NCwiZXhwIjoyMDg1NzY5Njc0fQ.4srZZEaHH9UtXHZVAmLG6U1jGb1NDxJ5GeqGFY_WkCA HOT_UPDATER_SUPABASE_BUCKET_NAME=bundles npx hot-updater deploy -t 4.7.0 -p android -c production -m \"new adds updated and ap chat and fix bugs\""
   },
   "dependencies": {
+    "@hot-updater/react-native": "^0.35.12",
     "@lottiefiles/lottie-player": "^2.0.12",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-clipboard/clipboard": "^1.16.3",
@@ -69,6 +70,8 @@
     "@babel/core": "^7.25.2",
     "@babel/preset-env": "^7.25.3",
     "@babel/runtime": "^7.28.6",
+    "@hot-updater/bare": "^0.35.12",
+    "@hot-updater/supabase": "^0.35.12",
     "@react-native-community/cli": "20.0.0",
     "@react-native-community/cli-platform-android": "20.0.0",
     "@react-native-community/cli-platform-ios": "20.0.0",
@@ -80,6 +83,7 @@
     "@types/react": "^19.2.0",
     "@types/react-test-renderer": "^19.1.0",
     "eslint": "^8.19.0",
+    "hot-updater": "^0.35.12",
     "jest": "^29.6.3",
     "prettier": "2.8.8",
     "react-test-renderer": "19.2.0",
