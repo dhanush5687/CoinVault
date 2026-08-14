@@ -1,0 +1,62 @@
+{
+  "bundleId": "019ff978-cad1-7d54-a545-03665be56ae8",
+  "assets": {
+    "drawable-mdpi/node_modules_reactnavigation_elements_lib_module_assets_backicon.png": {
+      "fileHash": "8b61a4c7ef70dc92753f0494976482f66fd4150ec23dfc772ab65e10373afa55"
+    },
+    "drawable-mdpi/node_modules_reactnavigation_elements_lib_module_assets_backiconmask.png": {
+      "fileHash": "9adb8c5efca932e2b732b293da813bd2e31952263056bce9e2517fec0f0b6a76"
+    },
+    "drawable-mdpi/node_modules_reactnavigation_elements_lib_module_assets_clearicon.png": {
+      "fileHash": "d03a5cd7a66ef10c5147916f9d5878b2d0a0a5ad46f405a31cd9967efaa55afd"
+    },
+    "drawable-mdpi/node_modules_reactnavigation_elements_lib_module_assets_closeicon.png": {
+      "fileHash": "b1bc1810ca23e2c38cd76971c43591d726161061240d8b792b05757196ddb528"
+    },
+    "drawable-mdpi/node_modules_reactnavigation_elements_lib_module_assets_searchicon.png": {
+      "fileHash": "ba722fb24bff0a4c52e656cdf205deac5c5df85e5bae2bf6d30713bd50c6d5f7"
+    },
+    "drawable-xhdpi/node_modules_reactnavigation_elements_lib_module_assets_backicon.png": {
+      "fileHash": "906666dd689346ada232ce3689adef907b4257fa1b593f03638d2b9497f64884"
+    },
+    "drawable-xhdpi/node_modules_reactnavigation_elements_lib_module_assets_clearicon.png": {
+      "fileHash": "ab5613d2ce70fa67c5926e831353664945199fc195fa6fe76c5fe3cec452e31a"
+    },
+    "drawable-xhdpi/node_modules_reactnavigation_elements_lib_module_assets_closeicon.png": {
+      "fileHash": "cbdf9213e55f65c48d076acd8423b7c9aee4f1b81101ff6c95a38c4cd8a86461"
+    },
+    "drawable-xhdpi/node_modules_reactnavigation_elements_lib_module_assets_searchicon.png": {
+      "fileHash": "5300f50be3659d17d8cee868ec4e6c0d3f4e89944fd5899d3c20f6a767a045f5"
+    },
+    "drawable-xxhdpi/node_modules_reactnavigation_elements_lib_module_assets_backicon.png": {
+      "fileHash": "ffa7ee45b76405ba73921495008f7d68c9de6395f4b6941db063465f6e382320"
+    },
+    "drawable-xxhdpi/node_modules_reactnavigation_elements_lib_module_assets_clearicon.png": {
+      "fileHash": "c4e54e6a0a7de636aa153378fbc62ea4a41695bfedf807f90df7b18ffd733f67"
+    },
+    "drawable-xxhdpi/node_modules_reactnavigation_elements_lib_module_assets_closeicon.png": {
+      "fileHash": "d05c9d30d79f45a78e5585a2e7ec67c6a06a883dd9137e1d5059e8c87b33ce76"
+    },
+    "drawable-xxhdpi/node_modules_reactnavigation_elements_lib_module_assets_searchicon.png": {
+      "fileHash": "6c8f11bfd1c7e22769dc135c16ecd0e053bb55554da88b9611d9cf71d12136f1"
+    },
+    "drawable-xxxhdpi/node_modules_reactnavigation_elements_lib_module_assets_backicon.png": {
+      "fileHash": "84cf5eb3b20250f69e0e4733beb4da5f417f0682892a5ad1b5e62570753c21b1"
+    },
+    "drawable-xxxhdpi/node_modules_reactnavigation_elements_lib_module_assets_clearicon.png": {
+      "fileHash": "c86bb485eee687e06c500fc4234f51a6784b4530c2ae11d0c76481110bce3105"
+    },
+    "drawable-xxxhdpi/node_modules_reactnavigation_elements_lib_module_assets_closeicon.png": {
+      "fileHash": "2325c53a73e54c438cbbc60dffdd8b513d471ba42e2f56713ef404b95e0ca1fc"
+    },
+    "drawable-xxxhdpi/node_modules_reactnavigation_elements_lib_module_assets_searchicon.png": {
+      "fileHash": "5d075e0c287c4f4441b5b5c8fc7ea5cd27c11bb617ecea09755955bcb1889083"
+    },
+    "index.android.bundle": {
+      "fileHash": "3407ade8b20b68be357868bb1baac274cfc87ea58f0a36b019a3d676d7e9cd26"
+    },
+    "raw/keep.xml": {
+      "fileHash": "4fea1e791c602158686877824c0a5dd25406384ab5f3dbf8ffe30b380849afcd"
+    }
+  }
+}

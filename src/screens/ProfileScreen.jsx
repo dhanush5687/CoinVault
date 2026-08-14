@@ -23,7 +23,7 @@ import { deleteAccount, updateUserProfile, signOut, syncUserActivity } from "../
 
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { BannerAd, BannerAdSize } from "react-native-google-mobile-ads";
-import { ADMOB_BANNER_ID } from "@env";
+import { ADMOB_BANNER_ID, VERSION_NAME } from "@env";
 import { showAppOpenAd } from "../ads/AppOpenManager";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback } from "react";
@@ -464,6 +464,8 @@ export default function ProfileScreen({ navigation }) {
                         <Text style={[styles.logoutText, { color: '#ef4444', fontSize: 13 }]}>Delete Account Permanently</Text>
                     </View>
                 </TouchableOpacity>
+
+                <Text style={styles.versionText}>App Version {VERSION_NAME}</Text>
             </View>
 
             {/* Bottom Banner */}
@@ -742,81 +744,9 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '700',
     },
-
-    // Header Row
-    headerRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 10,
-        position: 'relative'
-    },
-    infoBtn: {
-        position: 'absolute',
-        right: 10,
-        padding: 5
-    },
-
-    // Privacy Modal
-    privacyHeader: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: 15,
-        backgroundColor: "#1e293b",
-        borderBottomWidth: 1,
-        borderBottomColor: "#334155",
-        marginTop: 40 // Safe area
-    },
-    privacyTitle: {
-        fontSize: 18,
-        fontWeight: "bold",
-        color: "#fff"
-    },
-    privacyContent: {
-        flex: 1,
-        padding: 20
-    },
-    privacySubtitle: {
-        color: "#9ca3af",
-        textAlign: "center",
-        marginBottom: 20,
-        fontStyle: "italic"
-    },
-    h2: {
-        color: "#fff",
-        fontSize: 18,
-        fontWeight: "bold",
+    versionText: {
+        color: '#64748b',
+        fontSize: 12,
         marginTop: 20,
-        marginBottom: 10,
-        borderBottomWidth: 1,
-        borderBottomColor: "#334155",
-        paddingBottom: 5
     },
-    h3: {
-        color: "#e2e8f0",
-        fontSize: 16,
-        fontWeight: "600",
-        marginTop: 15,
-        marginBottom: 5
-    },
-    p: {
-        color: "#cbd5e1",
-        lineHeight: 22,
-        marginBottom: 10,
-        fontSize: 14
-    },
-    bold: {
-        fontWeight: "bold",
-        color: "#fff"
-    },
-    ul: {
-        paddingLeft: 10,
-        marginBottom: 10
-    },
-    li: {
-        color: "#cbd5e1",
-        lineHeight: 24,
-        fontSize: 14
-    }
 });

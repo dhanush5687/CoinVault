@@ -65,7 +65,10 @@
 import React, { useEffect } from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { withStallion } from 'react-native-stallion';
+import { Linking } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+// import { withStallion } from 'react-native-stallion';
+import { HotUpdater } from '@hot-updater/react-native';
 
 // 🔥 Ads
 import mobileAds from "react-native-google-mobile-ads";
@@ -88,7 +91,7 @@ import ChatScreen from "./src/screens/ChatScreen";
 import AdminChatScreen from "./src/screens/AdminChatScreen";
 
 // Components
-import StallionUpdateModal from "./src/components/StallionUpdateModal";
+// import StallionUpdateModal from "./src/components/StallionUpdateModal";
 
 const Stack = createNativeStackNavigator();
 
@@ -161,7 +164,8 @@ function App() {
 
     return (
         <>
-            <StallionUpdateModal />
+        <>
+            {/* <StallionUpdateModal /> */}
             <NavigationContainer>
                 <Stack.Navigator screenOptions={{ headerShown: false }}>
                     <Stack.Screen name="Splash" component={SplashScreen} />
@@ -183,7 +187,9 @@ function App() {
                 </Stack.Navigator>
             </NavigationContainer>
         </>
+        </>
     );
 }
 
-export default withStallion(App);
+export default App;
+// export default withStallion(App);
