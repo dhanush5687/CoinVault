@@ -4,8 +4,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export const saveUserToDB = async (user) => {
   const uid = user.uid;
+  const DB_URL = 'https://facevaultapp-bb50e-default-rtdb.firebaseio.com';
 
-  const userRef = database().ref(`users/${uid}`);
+  const userRef = database().refFromURL(`${DB_URL}/users/${uid}`);
   const snap = await userRef.once("value");
 
   if (!snap.exists()) {
@@ -18,7 +19,7 @@ export const saveUserToDB = async (user) => {
     });
   }
 
-  const walletRef = database().ref(`wallets/${uid}`);
+  const walletRef = database().refFromURL(`${DB_URL}/wallets/${uid}`);
   const walletSnap = await walletRef.once("value");
 
   if (!walletSnap.exists()) {

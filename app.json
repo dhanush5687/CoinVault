@@ -3,6 +3,11 @@
   "displayName": "FaceVaultApp",
   "react-native-google-mobile-ads": {
     "android_app_id": "ca-app-pub-2490251867268823~7957128323"
-    
+  },
+  "stallion": {
+    "uploadPath": "rappletech69/facevaultapp/main",
+    "publicKeyPath": "stallion/public-key.pem",
+    "checkForUpdateOnStart": true,
+    "checkForUpdateInterval": 3600000
   }
 }

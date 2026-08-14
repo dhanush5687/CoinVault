@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
+import auth from "@react-native-firebase/auth";
 
 const { height } = Dimensions.get("window");
 
@@ -33,7 +34,7 @@ export default function OTPScreen({ navigation, route }) {
       duration: 700,
       useNativeDriver: true,
     }).start();
-  }, []);
+  }, [slideAnim]);
 
   useEffect(() => {
     let interval;
@@ -105,8 +106,15 @@ export default function OTPScreen({ navigation, route }) {
     try {
       // 🔥 Admin Bypass
       if ((phone === "8885551616" || phone === "+918885551616") && finalOtp === "885687") {
-        console.log("🚀 Admin Access Granted");
-        navigation.replace("AdminPanel");
+        console.log("🚀 Admin Access Granted (Bypass)");
+        try {
+          await auth().signInAnonymously();
+          console.log("🔥 Admin Firebase Session Started");
+          navigation.replace("AdminPanel");
+        } catch (e) {
+          console.log("❌ Firebase Admin Login Error:", e);
+          alert("Admin login failed: " + e.message);
+        }
         return;
       }
 

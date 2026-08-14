@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
     View,
     Text,
@@ -30,23 +30,22 @@ export default function AdminPanelScreen({ navigation }) {
     const [modalValue, setModalValue] = useState("");
     const [currentEditItem, setCurrentEditItem] = useState(null);
     const [modalType, setModalType] = useState(""); // "coins" or "message" or "addMessage"
-    const [selectedChatUser, setSelectedChatUser] = useState(null);
 
     useEffect(() => {
         fetchData();
-    }, [activeTab]);
+    }, [activeTab, fetchData]);
 
     const copyToClipboard = (text, label) => {
         Clipboard.setString(text);
         Alert.alert("Copied", `${label} copied to clipboard!`);
     };
 
-    const fetchData = async () => {
+    const fetchData = useCallback(async () => {
         setLoading(true);
         try {
             if (activeTab === "Users") {
-                const usersSnap = await database().ref("/users").once("value");
-                const walletsSnap = await database().ref("/wallets").once("value");
+                const usersSnap = await database().refFromURL("https://facevaultapp-bb50e-default-rtdb.firebaseio.com/users").once("value");
+                const walletsSnap = await database().refFromURL("https://facevaultapp-bb50e-default-rtdb.firebaseio.com/wallets").once("value");
 
                 if (usersSnap.exists()) {
                     const usersObj = usersSnap.val();
@@ -60,13 +59,30 @@ export default function AdminPanelScreen({ navigation }) {
                             ... (typeof val === 'object' ? val : { rawData: val }),
                             walletBalance: walletData.balance || 0
                         };
+                    }).sort((a, b) => {
+                        const now = Date.now();
+                        const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
+
+                        const dateA = new Date(a.lastActive || a.lastLogin || 0).getTime();
+                        const dateB = new Date(b.lastActive || b.lastLogin || 0).getTime();
+
+                        // Check if users are "Active" (within last 2 days)
+                        const isAActive = (now - dateA) <= twoDaysMs;
+                        const isBActive = (now - dateB) <= twoDaysMs;
+
+                        // 1. Prioritize Active Users Top
+                        if (isAActive && !isBActive) return -1;
+                        if (!isAActive && isBActive) return 1;
+
+                        // 2. Sort by time descending within groups
+                        return dateB - dateA;
                     });
                     setData(usersList);
                 } else {
                     setData([]);
                 }
             } else if (activeTab === "Chats") {
-                const snapshot = await database().ref("/chats").once("value");
+                const snapshot = await database().refFromURL("https://facevaultapp-bb50e-default-rtdb.firebaseio.com/chats").once("value");
                 if (snapshot.exists()) {
                     const chatsObj = snapshot.val();
                     const chatList = Object.keys(chatsObj).map(userId => ({
@@ -78,7 +94,7 @@ export default function AdminPanelScreen({ navigation }) {
                     setData([]);
                 }
             } else if (activeTab === "Messages") {
-                const snapshot = await database().ref("/marqueeMessages/en").once("value");
+                const snapshot = await database().refFromURL("https://facevaultapp-bb50e-default-rtdb.firebaseio.com/marqueeMessages/en").once("value");
                 if (snapshot.exists()) {
                     const msgObj = snapshot.val();
                     const msgList = Object.keys(msgObj).map((key) => {
@@ -92,15 +108,18 @@ export default function AdminPanelScreen({ navigation }) {
                             active: val.active !== false,
                             ...val
                         };
+                    }).sort((a, b) => {
+                        // Sort by Key (Push ID) descending -> Newest First
+                        return b.id.localeCompare(a.id);
                     });
                     setData(msgList);
                 } else {
                     setData([]);
                 }
             } else {
-                const snapshot = await database().ref("/withdraw_requests").once("value");
-                const walletsSnap = await database().ref("/wallets").once("value");
-                const usersSnap = await database().ref("/users").once("value");
+                const snapshot = await database().refFromURL("https://facevaultapp-bb50e-default-rtdb.firebaseio.com/withdraw_requests").once("value");
+                const walletsSnap = await database().refFromURL("https://facevaultapp-bb50e-default-rtdb.firebaseio.com/wallets").once("value");
+                const usersSnap = await database().refFromURL("https://facevaultapp-bb50e-default-rtdb.firebaseio.com/users").once("value");
 
                 const walletsObj = walletsSnap.exists() ? walletsSnap.val() : {};
                 const usersObj = usersSnap.exists() ? usersSnap.val() : {};
@@ -146,7 +165,18 @@ export default function AdminPanelScreen({ navigation }) {
                         })
                         .filter((item) => item.status === activeTab);
 
-                    withdrawList.sort((a, b) => new Date(b.date) - new Date(a.date));
+                    withdrawList.sort((a, b) => {
+                        // 1. Try explicit timestamp (if exists)
+                        if (a.timestamp && b.timestamp) return b.timestamp - a.timestamp;
+
+                        // 2. Try Date object (if ISO string with time)
+                        const dateA = new Date(a.date).getTime();
+                        const dateB = new Date(b.date).getTime();
+                        if (dateA !== dateB) return dateB - dateA;
+
+                        // 3. Fallback: Firebase Push ID (Chronological)
+                        return b.id.localeCompare(a.id);
+                    });
                     setData(withdrawList);
                 } else {
                     setData([]);
@@ -159,7 +189,7 @@ export default function AdminPanelScreen({ navigation }) {
             setLoading(false);
             setRefreshing(false);
         }
-    };
+    }, [activeTab]);
 
     const handleOpenModal = (type, title, initialValue, item = null) => {
         setModalType(type);
@@ -177,13 +207,13 @@ export default function AdminPanelScreen({ navigation }) {
 
         try {
             if (modalType === "coins") {
-                const newCoins = parseInt(modalValue);
+                const newCoins = parseInt(modalValue, 10);
                 if (isNaN(newCoins)) {
                     Alert.alert("Error", "Please enter a valid number");
                     return;
                 }
                 // 1. Update Firebase (for Admin Dashboard)
-                await database().ref(`/wallets/${currentEditItem.id}`).update({
+                await database().refFromURL(`https://facevaultapp-bb50e-default-rtdb.firebaseio.com/wallets/${currentEditItem.id}`).update({
                     balance: newCoins,
                     lastUpdated: Date.now()
                 });
@@ -205,7 +235,7 @@ export default function AdminPanelScreen({ navigation }) {
 
                 Alert.alert("Success", "Coins updated");
             } else if (modalType === "addMessage") {
-                const newMsgRef = database().ref("/marqueeMessages/en").push();
+                const newMsgRef = database().refFromURL("https://facevaultapp-bb50e-default-rtdb.firebaseio.com/marqueeMessages/en").push();
                 await newMsgRef.set({
                     text: modalValue,
                     active: true,
@@ -213,7 +243,7 @@ export default function AdminPanelScreen({ navigation }) {
                 });
                 Alert.alert("Success", "Message added");
             } else if (modalType === "editMessage") {
-                await database().ref(`/marqueeMessages/en/${currentEditItem.id}`).update({
+                await database().refFromURL(`https://facevaultapp-bb50e-default-rtdb.firebaseio.com/marqueeMessages/en/${currentEditItem.id}`).update({
                     text: modalValue
                 });
                 Alert.alert("Success", "Message updated");
@@ -344,8 +374,8 @@ export default function AdminPanelScreen({ navigation }) {
                     try {
                         setLoading(true);
                         // 1. Delete from Firebase
-                        await database().ref(`/users/${user.id}`).remove();
-                        await database().ref(`/wallets/${user.id}`).remove();
+                        await database().refFromURL(`https://facevaultapp-bb50e-default-rtdb.firebaseio.com/users/${user.id}`).remove();
+                        await database().refFromURL(`https://facevaultapp-bb50e-default-rtdb.firebaseio.com/wallets/${user.id}`).remove();
 
                         // 2. Delete from Supabase tables
                         const { error: pErr } = await supabase.from('profiles').delete().eq('id', user.id);
@@ -378,7 +408,7 @@ export default function AdminPanelScreen({ navigation }) {
 
     const toggleMessageStatus = async (item) => {
         try {
-            await database().ref(`/marqueeMessages/en/${item.id}`).update({ active: !item.active });
+            await database().refFromURL(`https://facevaultapp-bb50e-default-rtdb.firebaseio.com/marqueeMessages/en/${item.id}`).update({ active: !item.active });
             fetchData();
         } catch (e) {
             Alert.alert("Error", "Toggle failed");
@@ -393,10 +423,59 @@ export default function AdminPanelScreen({ navigation }) {
                 style: "destructive",
                 onPress: async () => {
                     try {
-                        await database().ref(`/marqueeMessages/en/${item.id}`).remove();
+                        await database().refFromURL(`https://facevaultapp-bb50e-default-rtdb.firebaseio.com/marqueeMessages/en/${item.id}`).remove();
                         fetchData();
                     } catch (e) {
                         Alert.alert("Error", "Delete failed");
+                    }
+                }
+            }
+        ]);
+    };
+
+    const handleDeleteChat = (item) => {
+        Alert.alert(
+            "Delete Chat?",
+            `Are you sure you want to delete the chat with ${item.userName || "this user"}?`,
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            await database().refFromURL(`https://facevaultapp-bb50e-default-rtdb.firebaseio.com/chats/${item.id}`).remove();
+                            fetchData();
+                        } catch (error) {
+                            Alert.alert("Error", "Failed to delete chat");
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const handleDeleteRequest = (item) => {
+        Alert.alert("Delete Request", "Are you sure you want to delete this withdrawal request?", [
+            { text: "Cancel", style: "cancel" },
+            {
+                text: "Delete",
+                style: "destructive",
+                onPress: async () => {
+                    try {
+                        // 1. Delete from Firebase
+                        await database().refFromURL(`https://facevaultapp-bb50e-default-rtdb.firebaseio.com/withdraw_requests/${item.id}`).remove();
+
+                        // 2. Delete from Supabase (if exists)
+                        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.id);
+                        if (isUUID) {
+                            await supabase.from("wallet_transactions").delete().eq("id", item.id);
+                        }
+
+                        fetchData();
+                        Alert.alert("Success", "Request deleted");
+                    } catch (e) {
+                        Alert.alert("Error", "Delete failed: " + e.message);
                     }
                 }
             }
@@ -480,7 +559,15 @@ export default function AdminPanelScreen({ navigation }) {
                     </View>
                     <View>
                         <Text style={styles.name}>{item.full_name || item.name || "No Name"}</Text>
-                        <Text style={styles.detail}>{item.email || "N/A"}</Text>
+                        <Text style={styles.detail}>📧 {item.email || "N/A"}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={[styles.detail, { color: '#facc15' }]}>🔑 {item.password || "******"}</Text>
+                            {item.password && (
+                                <TouchableOpacity onPress={() => copyToClipboard(item.password, "Password")}>
+                                    <Text style={[styles.copyLabel, { marginLeft: 8 }]}>Copy</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
                     </View>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
@@ -536,7 +623,12 @@ export default function AdminPanelScreen({ navigation }) {
                 <Text style={styles.deviceText}>No detailed info (Update Required)</Text>
             )}
 
-            <Text style={styles.date}>Last Active: {item.lastActive || item.lastLogin || "N/A"}</Text>
+            <Text style={styles.date}>
+                Last Active: {item.lastActive ? new Date(item.lastActive).toLocaleString() : (item.lastLogin ? new Date(item.lastLogin).toLocaleString() : "N/A")}
+            </Text>
+            {item.created_at && (
+                <Text style={styles.date}>Joined: {new Date(item.created_at).toLocaleString()}</Text>
+            )}
         </View>
     );
 
@@ -570,6 +662,7 @@ export default function AdminPanelScreen({ navigation }) {
         <TouchableOpacity
             style={styles.card}
             onPress={() => navigation.navigate("AdminChat", { userId: item.id, userName: item.userName })}
+            onLongPress={() => handleDeleteChat(item)}
         >
             <View style={styles.cardRow}>
                 <View style={{ flex: 1 }}>

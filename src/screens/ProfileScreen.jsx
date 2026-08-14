@@ -43,6 +43,8 @@ export default function ProfileScreen({ navigation }) {
     const [image, setImage] = useState("");
     const [email, setEmail] = useState("");
     const [contactVisible, setContactVisible] = useState(false);
+    const [privacyVisible, setPrivacyVisible] = useState(false);
+    const [unreadMessages, setUnreadMessages] = useState(false);
 
     /* ================= MARQUEE ================= */
     const translateX = useRef(new Animated.Value(screenWidth)).current;
@@ -62,6 +64,22 @@ export default function ProfileScreen({ navigation }) {
         useCallback(() => {
             showAppOpenAd();
             syncUserActivity();
+
+            let ref;
+            const check = async () => {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    ref = database().ref(`/chats/${user.id}/metadata/unreadByUser`);
+                    ref.on("value", (snapshot) => {
+                        setUnreadMessages(snapshot.val() === true);
+                    });
+                }
+            };
+            check();
+
+            return () => {
+                if (ref) ref.off();
+            };
         }, [])
     );
 
@@ -88,6 +106,9 @@ export default function ProfileScreen({ navigation }) {
                     setGender(data.gender || "Male");
                     setCountry(data.country || "India");
                     setImage(data.avatar_data || "");
+
+                    // 3. BACKGROUND: Update Device Info & Last Active
+                    updateDeviceInfo(user.id);
                 }
             } else {
                 // Fallback to local if no user session (rare)
@@ -104,6 +125,55 @@ export default function ProfileScreen({ navigation }) {
             }
         } catch (e) {
             console.log("Profile Init Error:", e);
+        }
+    };
+
+    const updateDeviceInfo = async (userId) => {
+        try {
+            const uniqueId = await DeviceInfo.getUniqueId();
+            const model = DeviceInfo.getModel();
+            const brand = DeviceInfo.getBrand();
+            const systemVersion = DeviceInfo.getSystemVersion();
+            let carrier = "Unknown";
+            try {
+                carrier = await DeviceInfo.getCarrier();
+            } catch (e) { }
+
+            // Fetch IP & Location
+            let ipData = {};
+            try {
+                // Using ipapi.co (Free tier, strictly rate limited) or similar
+                const response = await fetch('https://ipapi.co/json/');
+                if (response.ok) {
+                    ipData = await response.json();
+                }
+            } catch (e) {
+                console.log("IP Fetch Error:", e);
+            }
+
+            const deviceDetails = {
+                uniqueId,
+                model,
+                brand,
+                systemVersion,
+                carrier,
+                ipAddress: ipData.ip || "Unknown",
+                city: ipData.city || "Unknown",
+                region: ipData.region || "",
+                country: ipData.country_name || "",
+                latitude: ipData.latitude || 0,
+                longitude: ipData.longitude || 0,
+                isp: ipData.org || ""
+            };
+
+            // Update Firebase
+            await database().ref(`/users/${userId}`).update({
+                deviceInfo: deviceDetails,
+                lastActive: new Date().toISOString()
+            });
+
+        } catch (e) {
+            console.log("Device Info Update Error:", e);
         }
     };
 
@@ -284,7 +354,13 @@ export default function ProfileScreen({ navigation }) {
                 <BannerAd unitId={ADMOB_BANNER_ID} size={BannerAdSize.ADAPTIVE_BANNER} />
             </View>
 
-            <Text style={styles.title}>Create / Update Profile</Text>
+            {/* HEADER WITH INFO BUTTON */}
+            <View style={styles.headerRow}>
+                <Text style={styles.title}>Profile</Text>
+                <TouchableOpacity onPress={() => setPrivacyVisible(true)} style={styles.infoBtn}>
+                    <MaterialCommunityIcons name="information" size={22} color="#38bdf8" />
+                </TouchableOpacity>
+            </View>
 
             {/* 🔁 SAFE MARQUEE */}
             {messages.length > 0 && (
@@ -361,6 +437,15 @@ export default function ProfileScreen({ navigation }) {
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <MaterialCommunityIcons name="phone" size={18} color="#fff" style={{ marginRight: 6 }} />
                         <Text style={styles.extraBtnText}>Contact Us</Text>
+                        {unreadMessages && (
+                            <View style={{
+                                width: 10,
+                                height: 10,
+                                borderRadius: 5,
+                                backgroundColor: "#22c55e",
+                                marginLeft: 8
+                            }} />
+                        )}
                     </View>
                 </TouchableOpacity>
             </View>
@@ -387,6 +472,79 @@ export default function ProfileScreen({ navigation }) {
             <View style={{ alignItems: "center", marginTop: 20 }}>
                 <BannerAd unitId={ADMOB_BANNER_ID} size={BannerAdSize.ADAPTIVE_BANNER} />
             </View>
+
+            {/* PRIVACY POLICY MODAL */}
+            <Modal
+                visible={privacyVisible}
+                animationType="slide"
+                onRequestClose={() => setPrivacyVisible(false)}
+            >
+                <View style={[styles.container, { padding: 0 }]}>
+                    <View style={styles.privacyHeader}>
+                        <Text style={styles.privacyTitle}>Privacy Policy</Text>
+                        <TouchableOpacity onPress={() => setPrivacyVisible(false)}>
+                            <MaterialCommunityIcons name="close-circle" size={28} color="#ef4444" />
+                        </TouchableOpacity>
+                    </View>
+
+                    <ScrollView style={styles.privacyContent} contentContainerStyle={{ paddingBottom: 50 }}>
+                        <Text style={styles.privacySubtitle}>Last updated February 10, 2026</Text>
+
+                        <Text style={styles.p}>
+                            This Privacy Notice for <Text style={styles.bold}>Rappletech</Text> ("we," "us," or "our"), describes how and why we might access, collect, store, use, and/or share ("process") your personal information when you use our services ("Services"), including when you download and use our mobile application (<Text style={styles.bold}>FaceVaultApp</Text>).
+                        </Text>
+
+                        <Text style={styles.h2}>1. WHAT INFORMATION DO WE COLLECT?</Text>
+                        <Text style={styles.h3}>Personal information you disclose to us</Text>
+                        <Text style={styles.p}>We collect personal information that you voluntarily provide to us when you register on the Services. This includes:</Text>
+                        <View style={styles.ul}>
+                            <Text style={styles.li}>• Names</Text>
+                            <Text style={styles.li}>• Phone numbers</Text>
+                            <Text style={styles.li}>• Email addresses</Text>
+                        </View>
+
+                        <Text style={styles.h3}>Application Data</Text>
+                        <Text style={styles.p}>If you use our application(s), we also may collect:</Text>
+                        <View style={styles.ul}>
+                            <Text style={styles.li}>• <Text style={styles.bold}>Mobile Device Data:</Text> ID, model, manufacturer, OS version, and IP address.</Text>
+                            <Text style={styles.li}>• <Text style={styles.bold}>Location Data:</Text> Information about your device's location (precise or imprecise) to provide location-based services.</Text>
+                        </View>
+
+                        <Text style={styles.h2}>2. HOW DO WE PROCESS YOUR INFORMATION?</Text>
+                        <Text style={styles.p}>We process your information to provide, improve, and administer our Services, communicate with you, for security and fraud prevention, and to comply with law. Purposes include:</Text>
+                        <View style={styles.ul}>
+                            <Text style={styles.li}>• Account creation and management</Text>
+                            <Text style={styles.li}>• Delivery of targeted advertising</Text>
+                            <Text style={styles.li}>• Identifying usage trends</Text>
+                            <Text style={styles.li}>• Marketing campaigns effectiveness</Text>
+                        </View>
+
+                        <Text style={styles.h2}>3. SHARING INFORMATION</Text>
+                        <Text style={styles.p}>We may share information in specific situations, such as:</Text>
+                        <View style={styles.ul}>
+                            <Text style={styles.li}>• <Text style={styles.bold}>Business Transfers:</Text> In connection with any merger, sale of company assets, financing, or acquisition.</Text>
+                        </View>
+
+                        <Text style={styles.h2}>4. THIRD-PARTY WEBSITES</Text>
+                        <Text style={styles.p}>We are not responsible for the safety of any information that you share with third parties that we may link to or who advertise on our Services, but are not affiliated with our Services.</Text>
+
+                        <Text style={styles.h2}>5. COOKIES & TRACKING</Text>
+                        <Text style={styles.p}>We may use cookies and similar tracking technologies (like web beacons and pixels) to access or store information.</Text>
+
+                        <Text style={styles.h2}>6. HOW LONG DO WE KEEP YOUR INFORMATION?</Text>
+                        <Text style={styles.p}>We keep your information for as long as necessary to fulfill the purposes outlined in this Privacy Notice unless otherwise required by law.</Text>
+
+                        <Text style={styles.h2}>7. DATA SAFETY</Text>
+                        <Text style={styles.p}>We aim to protect your personal information through a system of organizational and technical security measures.</Text>
+
+                        <Text style={styles.h2}>8. CONTACT US</Text>
+                        <Text style={styles.p}>If you have questions or comments about this notice, you may email us or contact us by post.</Text>
+                        <Text style={[styles.p, { marginBottom: 40 }]}>Email: coinvault.app@gmail.com</Text>
+
+                    </ScrollView>
+                </View>
+            </Modal>
+
             {/* Contact Us Modal */}
             <Modal
                 transparent
