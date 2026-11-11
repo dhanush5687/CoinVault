@@ -89,6 +89,7 @@ import SignupScreen from "./src/screens/SignupScreen";
 import AdminPanelScreen from "./src/screens/AdminPanelScreen";
 import ChatScreen from "./src/screens/ChatScreen";
 import AdminChatScreen from "./src/screens/AdminChatScreen";
+import QuizScreen from "./src/screens/QuizScreen";
 
 // Components
 // import StallionUpdateModal from "./src/components/StallionUpdateModal";
@@ -168,6 +169,7 @@ function App() {
                     <Stack.Screen name="SpinWheel" component={SpinWheel} />
                     <Stack.Screen name="Chat" component={ChatScreen} />
                     <Stack.Screen name="AdminChat" component={AdminChatScreen} />
+                    <Stack.Screen name="Quiz" component={QuizScreen} />
 
                     {/* MAIN APP */}
                     <Stack.Screen name="MainTabs" component={TabNavigator} />

@@ -22,12 +22,14 @@ import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityI
 
 import { supabase } from "../config/supabase";
 import { syncUserActivity } from "../services/supabaseService";
+import { QUIZ_CATEGORIES } from "./QuizScreen";
 
 const { width } = Dimensions.get("window");
 
 export default function HomeScreen({ navigation }) {
     const [userName, setUserName] = useState("User");
     const [profileCompleted, setProfileCompleted] = useState(false);
+    const [showAllGames, setShowAllGames] = useState(false);
 
     const comingSoon = () => {
         Alert.alert(
@@ -170,7 +172,7 @@ export default function HomeScreen({ navigation }) {
                         <Text style={styles.winText}>Play Game</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity style={styles.winCard} onPress={comingSoon}>
+                    <TouchableOpacity style={styles.winCard} onPress={() => navigation.navigate("Quiz", { category: "genetics" })}>
                         <MaterialCommunityIcons name="brain" size={28} color="#9333ea" />
                         <Text style={styles.winText}>Play Quiz</Text>
                     </TouchableOpacity>
@@ -182,35 +184,60 @@ export default function HomeScreen({ navigation }) {
                 </View>
 
                 {/* Games List */}
-                <Text style={styles.sectionTitle}>Play Games & Win</Text>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginHorizontal: 15, marginTop: 20, marginBottom: 10 }}>
+                    <Text style={[styles.sectionTitle, { marginHorizontal: 0, marginTop: 0, marginBottom: 0 }]}>Play Games & Win</Text>
+                    <TouchableOpacity onPress={() => navigation.navigate("Quiz", { category: "all" })}>
+                        <Text style={{ color: "#38bdf8", fontWeight: "600", fontSize: 13 }}>View All ({QUIZ_CATEGORIES.length})</Text>
+                    </TouchableOpacity>
+                </View>
 
-                {[1, 2, 3, 4].map((item, index) => (
+                {QUIZ_CATEGORIES.slice(0, showAllGames ? QUIZ_CATEGORIES.length : 4).map((cat) => (
                     <TouchableOpacity
-                        key={index}
+                        key={cat.id}
                         style={styles.gameCard}
                         activeOpacity={0.8}
-                        onPress={comingSoon}
+                        onPress={() => navigation.navigate("Quiz", { category: cat.id, title: cat.title })}
                     >
-                        <View style={styles.gameImagePlaceholder}>
-                            <MaterialCommunityIcons name="gamepad-variant" size={30} color="#fff" />
+                        <View style={[styles.gameImagePlaceholder, { backgroundColor: cat.color }]}>
+                            <MaterialCommunityIcons name={cat.icon} size={28} color="#fff" />
                         </View>
                         <View style={{ flex: 1, marginLeft: 15 }}>
-                            <Text style={styles.gameTitle}>Biology Quiz & Win</Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                                <MaterialCommunityIcons name="fire" size={14} color="#22c55e" />
-                                <Text style={styles.gameSub}> 20 coins / min</Text>
+                            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                                <Text style={styles.gameTitle}>{cat.title} & Win</Text>
+                                {cat.badge && (
+                                    <View style={{ backgroundColor: cat.badgeColor + "22", borderColor: cat.badgeColor, borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                                        <Text style={{ color: cat.badgeColor, fontSize: 9, fontWeight: "700" }}>{cat.badge}</Text>
+                                    </View>
+                                )}
                             </View>
-                            <View style={{ flexDirection: 'row', marginTop: 4 }}>
-                                {[1, 2, 3, 4].map(s => <MaterialCommunityIcons key={s} name="star" size={14} color="#facc15" />)}
-                                <MaterialCommunityIcons name="star-outline" size={14} color="#facc15" />
+                            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
+                                <MaterialCommunityIcons name="fire" size={14} color="#22c55e" />
+                                <Text style={styles.gameSub}> {cat.rewardPerQ} coins / correct</Text>
+                            </View>
+                            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
+                                {[1, 2, 3, 4].map((s) => (
+                                    <MaterialCommunityIcons key={s} name="star" size={14} color="#facc15" />
+                                ))}
+                                {cat.stars === 5 ? (
+                                    <MaterialCommunityIcons name="star" size={14} color="#facc15" />
+                                ) : (
+                                    <MaterialCommunityIcons name="star-half-full" size={14} color="#facc15" />
+                                )}
+                                <Text style={{ color: "#94a3b8", fontSize: 11, marginLeft: 6 }}>Biology Quiz</Text>
                             </View>
                         </View>
+                        <MaterialCommunityIcons name="chevron-right" size={22} color="#64748b" style={{ marginLeft: 6 }} />
                     </TouchableOpacity>
                 ))}
 
                 {/* Load More */}
-                <TouchableOpacity style={styles.loadMoreBtn} onPress={comingSoon}>
-                    <Text style={styles.loadMoreText}>Load More Games</Text>
+                <TouchableOpacity
+                    style={styles.loadMoreBtn}
+                    onPress={() => setShowAllGames(!showAllGames)}
+                >
+                    <Text style={styles.loadMoreText}>
+                        {showAllGames ? "Show Fewer Categories" : `Explore All Categories (${QUIZ_CATEGORIES.length})`}
+                    </Text>
                 </TouchableOpacity>
 
                 {/* Daily Bonus */}
@@ -317,6 +344,8 @@ const styles = StyleSheet.create({
         height: 60,
         borderRadius: 12,
         backgroundColor: "#2563eb",
+        alignItems: "center",
+        justifyContent: "center",
     },
 
     gameTitle: { color: "#fff", fontWeight: "600" },

@@ -6,15 +6,16 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA"/>
-<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
 
-<uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
-<uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
-<uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+    <!-- Remove broad media/storage permissions to comply with Google Play Photo & Video policy -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
 
-<uses-permission android:name="android.permission.USE_BIOMETRIC"/>
-<uses-permission android:name="android.permission.USE_FINGERPRINT"/>
+    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+    <uses-permission android:name="android.permission.USE_FINGERPRINT"/>
 
 
     <application
@@ -54,10 +55,24 @@
         
       </activity>
      
-<meta-data
-    android:name="com.google.android.gms.ads.APPLICATION_ID"
-    android:value="ca-app-pub-2490251867268823~7957128323"
-    tools:replace="android:value" />
+      <meta-data
+          android:name="com.google.android.gms.ads.APPLICATION_ID"
+          android:value="ca-app-pub-2490251867268823~7957128323"
+          tools:replace="android:value" />
+
+      <!-- Trigger Google Play services to install the backported Photo Picker on Android 11 & 12 -->
+      <service
+          android:name="com.google.android.gms.metadata.ModuleDependencies"
+          android:enabled="false"
+          android:exported="false"
+          tools:ignore="MissingClass">
+          <intent-filter>
+              <action android:name="com.google.android.gms.metadata.MODULE_DEPENDENCIES" />
+          </intent-filter>
+          <meta-data
+              android:name="photopicker_activity:0:required"
+              android:value="" />
+      </service>
     </application>
 </manifest>
 

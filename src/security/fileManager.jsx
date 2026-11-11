@@ -168,7 +168,6 @@
 // };
 
 import RNFS from "react-native-fs";
-import { PermissionsAndroid, Platform } from "react-native";
 
 const VAULT_PATH = `${RNFS.DocumentDirectoryPath}/.vault`;
 
