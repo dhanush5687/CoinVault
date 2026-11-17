@@ -438,9 +438,6 @@ export default function WalletScreen() {
       isSubmittingRef.current = false;
       setLoading(false);
     }
-    } finally {
-      setLoading(false);
-    }
   };
 
   const renderItem = ({ item }) => {
