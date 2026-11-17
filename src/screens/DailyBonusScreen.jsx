@@ -143,37 +143,17 @@ export default function DailyBonusScreen({ navigation }) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // 1. Fetch Current Balance from Firebase (Source of Truth)
-      const database = require("@react-native-firebase/database").default;
-      const walletSnap = await database().ref(`/wallets/${user.id}`).once("value");
+      // 🛡️ Atomic Reward via Supabase (F-05)
+      const { atomicRewardCoins } = require("../services/supabaseService");
+      const rewardRes = await atomicRewardCoins(coinsWon, `Daily Bonus Spin (+${coinsWon})`);
+      const newBalance = rewardRes.success ? rewardRes.newBalance : coinsWon;
 
-      let currentBalance = 0;
-      if (walletSnap.exists()) {
-        currentBalance = parseFloat(walletSnap.val().balance || 0);
-      } else {
-        // Fallback
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("wallet_balance")
-          .eq("id", user.id)
-          .single();
-        currentBalance = parseFloat(profile?.wallet_balance || 0);
-      }
-
-      const newBalance = currentBalance + coinsWon;
-
-      // 2. Update Profile (Supabase)
-      await supabase
-        .from("profiles")
-        .update({ wallet_balance: newBalance })
-        .eq("id", user.id);
-
-      // 2b. Sync to Firebase (for Admin Panel)
+      // Sync to Firebase (for Admin Panel) with transaction
       try {
         const database = require("@react-native-firebase/database").default;
-        await database().ref(`/wallets/${user.id}`).update({
-          balance: newBalance,
-          lastUpdated: Date.now()
+        await database().ref(`/wallets/${user.id}/balance`).transaction((cur) => {
+          if (cur === null || cur === undefined) return newBalance;
+          return cur + coinsWon;
         });
       } catch (fbError) {
         console.warn("Firebase Sync Error:", fbError.message);

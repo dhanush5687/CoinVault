@@ -87,22 +87,17 @@ export default function WatchScreen({ navigation }) {
             if (!user) return;
 
             const reward = 10;
-            const newBalance = coins + reward;
+            // 🛡️ Atomic Reward via Supabase (F-05)
+            const { atomicRewardCoins } = require("../services/supabaseService");
+            const rewardRes = await atomicRewardCoins(reward, "Watched rewarded ad");
+            const newBalance = rewardRes.success ? rewardRes.newBalance : (coins + reward);
 
-            // 1. Update Profile Balance
-            const { error: pError } = await supabase
-                .from("profiles")
-                .update({ wallet_balance: newBalance })
-                .eq("id", user.id);
-
-            if (pError) throw pError;
-
-            // 1b. Sync to Firebase (for Admin Panel)
+            // Sync to Firebase (for Admin Panel) with transaction
             try {
                 const database = require("@react-native-firebase/database").default;
-                await database().ref(`/wallets/${user.id}`).update({
-                    balance: newBalance,
-                    lastUpdated: Date.now()
+                await database().ref(`/wallets/${user.id}/balance`).transaction((cur) => {
+                    if (cur === null || cur === undefined) return newBalance;
+                    return cur + reward;
                 });
             } catch (fbError) {
                 console.warn("Firebase Sync Error:", fbError.message);

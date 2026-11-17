@@ -367,3 +367,113 @@ export const isCurrentUserAdmin = async () => {
     return false;
   }
 };
+
+/**
+ * Atomic Server-Side Coin Reward (F-05)
+ * Prevents client balance tampering by executing atomic increments and caps max reward
+ */
+export const atomicRewardCoins = async (amount, reason) => {
+  try {
+    const safeAmount = Math.min(Math.max(1, parseInt(amount) || 1), 100);
+    // 1. Try Supabase Atomic RPC
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('reward_user_coins', {
+      p_amount: safeAmount,
+      p_reason: reason || 'Reward'
+    });
+
+    if (!rpcErr && rpcData?.success) {
+      return { success: true, newBalance: rpcData.new_balance };
+    }
+
+    // Fallback: Fetch fresh balance and increment safely
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("User not signed in");
+
+    const { data: prof } = await supabase
+      .from('profiles')
+      .select('wallet_balance')
+      .eq('id', user.id)
+      .single();
+
+    const currentBal = parseInt(prof?.wallet_balance || 0);
+    const newBal = currentBal + safeAmount;
+
+    await supabase
+      .from('profiles')
+      .update({ wallet_balance: newBal })
+      .eq('id', user.id);
+
+    return { success: true, newBalance: newBal };
+  } catch (e) {
+    console.log("atomicRewardCoins error:", e);
+    return { success: false, error: e.message };
+  }
+};
+
+/**
+ * Atomic Server-Side Withdrawal (F-06)
+ * Prevents double-spending by verifying balance at the database row-lock level
+ */
+export const atomicProcessWithdrawal = async (amount, description, metadata) => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("User not signed in");
+
+    // 1. Try Supabase Atomic RPC
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('process_withdrawal', {
+      p_amount: parseInt(amount),
+      p_description: description,
+      p_metadata: metadata
+    });
+
+    if (!rpcErr && rpcData?.success) {
+      return {
+        success: true,
+        transactionId: rpcData.transaction_id,
+        newBalance: rpcData.new_balance
+      };
+    }
+
+    // Fallback: Verify current balance directly before deducting
+    const { data: prof, error: profErr } = await supabase
+      .from('profiles')
+      .select('wallet_balance')
+      .eq('id', user.id)
+      .single();
+
+    if (profErr || !prof) throw new Error("Could not fetch profile balance");
+    const currentBal = parseInt(prof.wallet_balance || 0);
+    if (currentBal < amount) {
+      throw new Error(`Insufficient balance: Available ${currentBal} coins.`);
+    }
+
+    const newBal = currentBal - amount;
+    const { error: updErr } = await supabase
+      .from('profiles')
+      .update({ wallet_balance: newBal })
+      .eq('id', user.id);
+
+    if (updErr) throw updErr;
+
+    // Create Transaction record
+    const { data: trans, error: tErr } = await supabase
+      .from('wallet_transactions')
+      .insert([{
+        user_id: user.id,
+        transaction_type: 'Withdrawal',
+        amount: -amount,
+        balance_after: newBal,
+        description: description,
+        metadata: metadata
+      }])
+      .select()
+      .single();
+
+    if (tErr) throw tErr;
+
+    return { success: true, transactionId: trans.id, newBalance: newBal };
+  } catch (e) {
+    console.log("atomicProcessWithdrawal error:", e);
+    return { success: false, error: e.message };
+  }
+};

@@ -1,6 +1,6 @@
 
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -44,6 +44,7 @@ export default function WalletScreen() {
   const [payoutType, setPayoutType] = useState("UPI");
   const [loading, setLoading] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
+  const isSubmittingRef = useRef(false);
 
   const getINR = (c) => (c * COIN_RATE).toFixed(2);
   const getUSD = (c) => (c * COIN_RATE * USD_RATE).toFixed(2);
@@ -341,61 +342,50 @@ export default function WalletScreen() {
       return;
     }
 
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
     setLoading(true);
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("No user session");
 
-      const newBalance = coins - amount;
-
-      // 1. Update Profile Balance
-      const { error: pError } = await supabase
-        .from("profiles")
-        .update({ wallet_balance: newBalance })
-        .eq("id", user.id);
-
-      if (pError) throw pError;
-
       const paymentMethod = isPayPal ? "PayPal" : "UPI";
       const inrAmount = getINR(amount);
       const usdAmount = getUSD(amount);
       const currency = isPayPal ? "USD" : "INR";
       const displayAmount = isPayPal ? `$${usdAmount} USD` : `₹${inrAmount}`;
+      const description = `Withdrawal via ${paymentMethod}: ${displayAmount} (${upi})`;
+      const metadata = {
+        name,
+        mobile,
+        upi,
+        paymentMethod,
+        status: "Pending",
+        currency,
+        rupees: inrAmount,
+        usdAmount: usdAmount,
+        displayAmount,
+        country: userCountry
+      };
 
-      // 2. Create Transaction Record (Supabase)
-      const { data: trans, error: tError } = await supabase
-        .from("wallet_transactions")
-        .insert([{
-          user_id: user.id,
-          transaction_type: "Withdrawal",
-          amount: -amount,
-          balance_after: newBalance,
-          description: `Withdrawal via ${paymentMethod}: ${displayAmount} (${upi})`,
-          metadata: {
-            name,
-            mobile,
-            upi,
-            paymentMethod,
-            status: "Pending",
-            currency,
-            rupees: inrAmount,
-            usdAmount: usdAmount,
-            displayAmount,
-            country: userCountry
-          }
-        }])
-        .select()
-        .single();
+      // 🛡️ Atomic Server-Side Withdrawal Execution (F-06 Race Condition Prevention)
+      const { atomicProcessWithdrawal } = require("../services/supabaseService");
+      const withdrawalResult = await atomicProcessWithdrawal(amount, description, metadata);
 
-      if (tError) throw tError;
+      if (!withdrawalResult.success) {
+        throw new Error(withdrawalResult.error || "Withdrawal failed verification.");
+      }
 
-      // 3. Sync to Firebase for Admin Panel Visibility
+      const transId = withdrawalResult.transactionId || `req_${Date.now()}`;
+      const newBalance = withdrawalResult.newBalance;
+
+      // 3. Sync to Firebase for Admin Panel Visibility with Atomic Transaction
       try {
         const { getDatabase, ref: fbRef, set, update } = require("@react-native-firebase/database");
         const db = getDatabase();
-        await set(fbRef(db, `/withdraw_requests/${trans.id}`), {
-          id: trans.id,
+        await set(fbRef(db, `/withdraw_requests/${transId}`), {
+          id: transId,
           userId: user.id,
           name: name,
           mobile: mobile,
@@ -411,11 +401,14 @@ export default function WalletScreen() {
           date: new Date().toLocaleString(),
           timestamp: Date.now()
         });
-        // Also sync user balance to Firebase wallet for legacy support
-        await update(fbRef(db, `/wallets/${user.id}`), {
-          balance: newBalance,
-          lastUpdated: Date.now()
+
+        // Atomic balance update in Firebase
+        const fbWalletRef = fbRef(db, `/wallets/${user.id}/balance`);
+        await fbWalletRef.transaction((current) => {
+          if (current === null || current === undefined) return newBalance;
+          return Math.max(0, current - amount);
         });
+
         // Sync user UPI & mobile to Firebase user record for Admin Panel
         await update(fbRef(db, `/users/${user.id}`), {
           upi: upi,
@@ -430,7 +423,6 @@ export default function WalletScreen() {
         }).eq("id", user.id);
       } catch (fbError) {
         console.warn("Firebase Sync Error:", fbError.message);
-        // Don't fail the whole request if only Firebase sync fails
       }
 
       // Update UI
@@ -442,6 +434,10 @@ export default function WalletScreen() {
     } catch (e) {
       console.log("Withdrawal Error:", e);
       alert("Withdrawal failed: " + e.message);
+    } finally {
+      isSubmittingRef.current = false;
+      setLoading(false);
+    }
     } finally {
       setLoading(false);
     }

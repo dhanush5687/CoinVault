@@ -526,17 +526,22 @@ export default function QuizScreen({ navigation, route }) {
                 currentBal = parseFloat(data?.wallet_balance || 0);
             }
 
-            // Floor at 0 so wallet balance never drops into negative
-            const newBal = Math.max(0, currentBal + pointsChange);
+            // 🛡️ Atomic Points Adjustment (F-05)
+            let newBal = currentBal;
+            if (pointsChange > 0) {
+                const { atomicRewardCoins } = require("../services/supabaseService");
+                const rewardRes = await atomicRewardCoins(pointsChange, `Quiz Reward (+${pointsChange})`);
+                newBal = rewardRes.success ? rewardRes.newBalance : Math.max(0, currentBal + pointsChange);
+            } else {
+                newBal = Math.max(0, currentBal + pointsChange);
+                await supabase.from("profiles").update({ wallet_balance: newBal }).eq("id", user.id);
+            }
 
-            // 1. Supabase update
-            await supabase.from("profiles").update({ wallet_balance: newBal }).eq("id", user.id);
-
-            // 2. Firebase sync
+            // 2. Firebase sync with atomic transaction
             try {
-                await database().ref(`/wallets/${user.id}`).update({
-                    balance: newBal,
-                    lastUpdated: Date.now(),
+                await database().ref(`/wallets/${user.id}/balance`).transaction((cur) => {
+                    if (cur === null || cur === undefined) return newBal;
+                    return Math.max(0, cur + pointsChange);
                 });
             } catch (fbErr) {
                 console.warn("Quiz Firebase sync error:", fbErr.message);
