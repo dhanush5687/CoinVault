@@ -71,6 +71,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 // import { withStallion } from 'react-native-stallion';
 import { HotUpdater } from '@hot-updater/react-native';
 import InAppNotificationBanner from "./src/components/InAppNotificationBanner";
+import ErrorBoundary from "./src/components/ErrorBoundary";
 
 // 🔥 Ads
 import mobileAds from "react-native-google-mobile-ads";
@@ -157,31 +158,33 @@ function App() {
     }, []);
 
     return (
-        <SafeAreaProvider>
-            <StatusBar barStyle="light-content" backgroundColor="#0a0f1f" translucent={false} />
-            <NavigationContainer ref={navigationRef}>
-                <Stack.Navigator screenOptions={{ headerShown: false }}>
-                    <Stack.Screen name="Splash" component={SplashScreen} />
-                    <Stack.Screen name="Login" component={LoginScreen} />
-                    <Stack.Screen name="Signup" component={SignupScreen} />
-                    <Stack.Screen name="Email" component={EmailScreen} />
-                    <Stack.Screen name="Phone" component={PhoneScreen} />
-                    <Stack.Screen name="OTP" component={OTPScreen} />
+        <ErrorBoundary>
+            <SafeAreaProvider>
+                <StatusBar barStyle="light-content" backgroundColor="#0a0f1f" translucent={false} />
+                <NavigationContainer ref={navigationRef}>
+                    <Stack.Navigator screenOptions={{ headerShown: false }}>
+                        <Stack.Screen name="Splash" component={SplashScreen} />
+                        <Stack.Screen name="Login" component={LoginScreen} />
+                        <Stack.Screen name="Signup" component={SignupScreen} />
+                        <Stack.Screen name="Email" component={EmailScreen} />
+                        <Stack.Screen name="Phone" component={PhoneScreen} />
+                        <Stack.Screen name="OTP" component={OTPScreen} />
 
-                    <Stack.Screen name="AdminPanel" component={AdminPanelScreen} />
+                        <Stack.Screen name="AdminPanel" component={AdminPanelScreen} />
 
-                    <Stack.Screen name="Watch" component={WatchScreen} />
-                    <Stack.Screen name="SpinWheel" component={SpinWheel} />
-                    <Stack.Screen name="Chat" component={ChatScreen} />
-                    <Stack.Screen name="AdminChat" component={AdminChatScreen} />
-                    <Stack.Screen name="Quiz" component={QuizScreen} />
+                        <Stack.Screen name="Watch" component={WatchScreen} />
+                        <Stack.Screen name="SpinWheel" component={SpinWheel} />
+                        <Stack.Screen name="Chat" component={ChatScreen} />
+                        <Stack.Screen name="AdminChat" component={AdminChatScreen} />
+                        <Stack.Screen name="Quiz" component={QuizScreen} />
 
-                    {/* MAIN APP */}
-                    <Stack.Screen name="MainTabs" component={TabNavigator} />
-                </Stack.Navigator>
-            </NavigationContainer>
-            <InAppNotificationBanner navigationRef={navigationRef} />
-        </SafeAreaProvider>
+                        {/* MAIN APP */}
+                        <Stack.Screen name="MainTabs" component={TabNavigator} />
+                    </Stack.Navigator>
+                </NavigationContainer>
+                <InAppNotificationBanner navigationRef={navigationRef} />
+            </SafeAreaProvider>
+        </ErrorBoundary>
     );
 }
 
