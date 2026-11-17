@@ -56,6 +56,7 @@ import { showInterstitialAd } from "../ads/InterstitialAdManager";
 export default function DailyBonusScreen({ navigation }) {
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0)).current;
+  const isSpinningRef = useRef(false);
 
   const [locked, setLocked] = useState(false);
   const [timer, setTimer] = useState("");
@@ -67,30 +68,50 @@ export default function DailyBonusScreen({ navigation }) {
     return () => clearInterval(t);
   }, []);
 
-  /* ================= DAILY LOCK ================= */
+  /* ================= DAILY LOCK (F-07 Anti-Tampering) ================= */
 
   const checkLock = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Check last claim from Supabase
-      const { data, error } = await supabase
+      let serverSpinTime = 0;
+      // Check last claim from Supabase (server-authoritative)
+      const { data } = await supabase
         .from("daily_bonuses")
-        .select("claimed_at")
+        .select("created_at, claimed_at")
         .eq("user_id", user.id)
-        .order("claimed_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(1);
 
-      if (!data || data.length === 0) {
+      if (data && data.length > 0) {
+        const rawTime = data[0].claimed_at || data[0].created_at;
+        if (rawTime) {
+          serverSpinTime = new Date(rawTime).getTime();
+        }
+      }
+
+      // Check local storage fallback
+      const AsyncStorage = require("@react-native-async-storage/async-storage").default;
+      const localSpinRaw = await AsyncStorage.getItem("LAST_SPIN_TIME");
+      const localSpinTime = localSpinRaw ? parseInt(localSpinRaw) : 0;
+
+      const lastSpin = Math.max(serverSpinTime, localSpinTime);
+      if (!lastSpin || isNaN(lastSpin)) {
         setLocked(false);
         setTimer("");
         return;
       }
 
-      const lastSpin = new Date(data[0].claimed_at).getTime();
-      const diff = 86400000 - (Date.now() - lastSpin);
+      const now = Date.now();
+      // Detect backward clock manipulation
+      if (now < lastSpin) {
+        setLocked(true);
+        setTimer("Clock Desynced");
+        return;
+      }
 
+      const diff = 86400000 - (now - lastSpin);
       if (diff <= 0) {
         setLocked(false);
         setTimer("");
@@ -113,7 +134,9 @@ export default function DailyBonusScreen({ navigation }) {
   /* ================= SPIN ================= */
 
   const spinWheel = async () => {
-    if (locked) return;
+    if (locked || isSpinningRef.current) return;
+    isSpinningRef.current = true;
+    setLocked(true);
 
     // Show Ad before spin
     showInterstitialAd();
@@ -132,6 +155,7 @@ export default function DailyBonusScreen({ navigation }) {
       useNativeDriver: true,
     }).start(async () => {
       await giveReward(reward);
+      isSpinningRef.current = false;
       checkLock();
     });
   };
@@ -142,6 +166,10 @@ export default function DailyBonusScreen({ navigation }) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+
+      const nowIso = new Date().toISOString();
+      const AsyncStorage = require("@react-native-async-storage/async-storage").default;
+      await AsyncStorage.setItem("LAST_SPIN_TIME", Date.now().toString()).catch(() => {});
 
       // 🛡️ Atomic Reward via Supabase (F-05)
       const { atomicRewardCoins } = require("../services/supabaseService");
@@ -159,13 +187,15 @@ export default function DailyBonusScreen({ navigation }) {
         console.warn("Firebase Sync Error:", fbError.message);
       }
 
-      // 3. Log Daily Bonus (Supabase)
+      // 3. Log Daily Bonus (Supabase) with both created_at and claimed_at
       await supabase
         .from("daily_bonuses")
         .insert([{
           user_id: user.id,
           reward_amount: coinsWon,
-          spin_result: coinsWon.toString()
+          spin_result: coinsWon.toString(),
+          claimed_at: nowIso,
+          created_at: nowIso
         }]);
 
       // 4. Log Transaction
