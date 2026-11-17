@@ -273,7 +273,29 @@ export default function AdminPanelScreen({ navigation }) {
                         })
                         .filter((item) => item.status === activeTab);
 
-                    withdrawList.sort((a, b) => new Date(b.date) - new Date(a.date));
+                    const getRequestTime = (item) => {
+                        if (typeof item.timestamp === "number" && item.timestamp > 0) return item.timestamp;
+                        if (item.paidAt) {
+                            const t = new Date(item.paidAt).getTime();
+                            if (!isNaN(t)) return t;
+                        }
+                        if (item.created_at) {
+                            const t = new Date(item.created_at).getTime();
+                            if (!isNaN(t)) return t;
+                        }
+                        if (item.date) {
+                            const parts = String(item.date).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+                            if (parts) {
+                                const parsed = new Date(`${parts[3]}-${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}`).getTime();
+                                if (!isNaN(parsed)) return parsed;
+                            }
+                            const t = new Date(item.date).getTime();
+                            if (!isNaN(t)) return t;
+                        }
+                        return 0;
+                    };
+
+                    withdrawList.sort((a, b) => getRequestTime(b) - getRequestTime(a));
                     setData(withdrawList);
                 } else {
                     setData([]);
@@ -660,6 +682,12 @@ export default function AdminPanelScreen({ navigation }) {
                         <Text style={styles.copyLabel}>Copy</Text>
                     </TouchableOpacity>
                 </View>
+            ) : null}
+
+            {item.paidAt ? (
+                <Text style={[styles.detail, { color: "#22c55e", fontWeight: "600", marginTop: 2 }]}>
+                    Paid At: {new Date(item.paidAt).toLocaleString()}
+                </Text>
             ) : null}
 
             <Text style={styles.date}>{item.date}</Text>

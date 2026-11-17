@@ -33,15 +33,7 @@ export default function OTPScreen({ navigation, route }) {
       duration: 700,
       useNativeDriver: true,
     }).start();
-
-    // Auto-fill admin code for designated admin number (fixes Twilio 20003 error)
-    const cleanPhone = (phone || "").replace(/\D/g, "");
-    if (cleanPhone.endsWith("8885551616")) {
-      setOtp(["8", "8", "5", "6", "8", "7"]);
-      setTimer(0);
-      setCanResend(true);
-    }
-  }, [phone]);
+  }, []);
 
   useEffect(() => {
     let interval;
@@ -75,8 +67,9 @@ export default function OTPScreen({ navigation, route }) {
 
     const cleanPhone = (phone || "").replace(/\D/g, "");
     if (cleanPhone.endsWith("8885551616")) {
-      setOtp(["8", "8", "5", "6", "8", "7"]);
-      alert("Admin Code: 885687");
+      setCanResend(false);
+      setTimer(60);
+      alert("Verification code resent.");
       return;
     }
 

@@ -18,7 +18,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../config/supabase";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { BannerAd, BannerAdSize } from "react-native-google-mobile-ads";
-import { ADMOB_BANNER_ID } from "@env";
 import AdmobBannerCard from "../components/AdmobBannerCard";
 import { showAppOpenAd } from "../ads/AppOpenManager";
 import { useFocusEffect } from "@react-navigation/native";
@@ -151,96 +150,143 @@ export default function WalletScreen() {
         }
       } catch (_) {}
 
-      // Fetch Transaction History
-      const { data: transactions, error: tError } = await supabase
-        .from("wallet_transactions")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
+      // Fetch Transaction History from Supabase
+      let transactions = [];
+      try {
+        const { data, error: tError } = await supabase
+          .from("wallet_transactions")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false });
+        if (data) transactions = data;
+      } catch (_) {}
 
-      if (transactions) {
-        // 3. Fetch current status from Firebase to ensure real-time accuracy for user
+      // Fetch current status from Firebase to ensure real-time accuracy for user
+      let fbData = {};
+      try {
         const withdrawQuery = query(ref(db, "/withdraw_requests"), orderByChild("userId"), equalTo(user.id));
         const fbSnap = await get(withdrawQuery);
-        const fbData = fbSnap.val() || {};
+        fbData = fbSnap.val() || {};
+      } catch (_) {}
 
-        // Collect all refund transactions by originalId to prevent duplicate rows
-        const refundByOriginalId = {};
-        transactions.forEach((t) => {
-          if (t.transaction_type === "Refund" && t.metadata?.originalId) {
-            refundByOriginalId[t.metadata.originalId] = t;
+      // Collect all refund transactions by originalId to prevent duplicate rows
+      const refundByOriginalId = {};
+      transactions.forEach((t) => {
+        if (t.transaction_type === "Refund" && t.metadata?.originalId) {
+          refundByOriginalId[t.metadata.originalId] = t;
+        }
+      });
+
+      // Set to track seen withdrawal IDs and prevent duplicate entries
+      const seenWithdrawalIds = new Set();
+      const formattedHistory = [];
+
+      transactions.forEach((t) => {
+        // If this is a separate Refund ledger row whose original withdrawal exists, SKIP IT
+        // so the user only sees ONE entry in Withdrawal History for that request
+        if (t.transaction_type === "Refund") {
+          const origId = t.metadata?.originalId;
+          const originalExists = origId && transactions.some((other) => other.id === origId);
+          if (originalExists) {
+            return; // Skip duplicate refund entry!
           }
+        }
+
+        // Prevent duplicate rows with identical IDs
+        if (seenWithdrawalIds.has(t.id)) {
+          return;
+        }
+        seenWithdrawalIds.add(t.id);
+
+        let status = "Completed";
+        let rejectReason = null;
+        let utrId = t.metadata?.utrId;
+        let paidAt = t.metadata?.paidAt;
+        let paymentMethod = t.metadata?.paymentMethod || (t.metadata?.upi?.toLowerCase().includes("paypal") ? "PayPal" : "UPI");
+
+        // Merge Firebase Status if available (it has the latest "Paid" or "Refunded" update from Admin)
+        const fbMatch = fbData[t.id];
+        if (fbMatch) {
+          status = fbMatch.status || "Pending";
+          rejectReason = fbMatch.rejectReason || null;
+          utrId = fbMatch.utrId || utrId;
+          paidAt = fbMatch.paidAt || paidAt;
+          if (fbMatch.paymentMethod) paymentMethod = fbMatch.paymentMethod;
+        } else if (t.transaction_type === "Withdrawal" && t.metadata && t.metadata.status) {
+          status = t.metadata.status;
+          rejectReason = t.metadata.rejectReason;
+        } else if (t.transaction_type === "Refund") {
+          status = "Refunded";
+          rejectReason = t.metadata?.reason;
+        }
+
+        // Check if there is a linked refund transaction that marks this withdrawal as refunded
+        const linkedRefund = refundByOriginalId[t.id];
+        if (linkedRefund) {
+          status = "Refunded";
+          if (!rejectReason) {
+            rejectReason = linkedRefund.metadata?.reason || "Details rejected by admin";
+          }
+        }
+
+        const tTimestamp = new Date(t.created_at).getTime();
+
+        formattedHistory.push({
+          id: t.id,
+          type: t.transaction_type,
+          coins: parseFloat(t.amount),
+          status: status,
+          rejectReason: rejectReason,
+          utrId: utrId,
+          paidAt: paidAt,
+          paymentMethod: paymentMethod,
+          date: new Date(t.created_at).toLocaleString(),
+          timestamp: !isNaN(tTimestamp) ? tTimestamp : 0,
         });
+      });
 
-        // Set to track seen withdrawal IDs and prevent duplicate entries
-        const seenWithdrawalIds = new Set();
-        const formattedHistory = [];
-
-        transactions.forEach((t) => {
-          // If this is a separate Refund ledger row whose original withdrawal exists, SKIP IT
-          // so the user only sees ONE entry in Withdrawal History for that request
-          if (t.transaction_type === "Refund") {
-            const origId = t.metadata?.originalId;
-            const originalExists = origId && transactions.some((other) => other.id === origId);
-            if (originalExists) {
-              return; // Skip duplicate refund entry!
-            }
-          }
-
-          // Prevent duplicate rows with identical IDs
-          if (seenWithdrawalIds.has(t.id)) {
-            return;
-          }
-          seenWithdrawalIds.add(t.id);
-
-          let status = "Completed";
-          let rejectReason = null;
-          let utrId = t.metadata?.utrId;
-          let paidAt = t.metadata?.paidAt;
-          let paymentMethod = t.metadata?.paymentMethod || (t.metadata?.upi?.toLowerCase().includes("paypal") ? "PayPal" : "UPI");
-
-          // Merge Firebase Status if available (it has the latest "Paid" or "Refunded" update from Admin)
-          const fbMatch = fbData[t.id];
-          if (fbMatch) {
-            status = fbMatch.status || "Pending";
-            rejectReason = fbMatch.rejectReason || null;
-            utrId = fbMatch.utrId || utrId;
-            paidAt = fbMatch.paidAt || paidAt;
-            if (fbMatch.paymentMethod) paymentMethod = fbMatch.paymentMethod;
-          } else if (t.transaction_type === "Withdrawal" && t.metadata && t.metadata.status) {
-            status = t.metadata.status;
-            rejectReason = t.metadata.rejectReason;
-          } else if (t.transaction_type === "Refund") {
-            status = "Refunded";
-            rejectReason = t.metadata?.reason;
-          }
-
-          // Check if there is a linked refund transaction that marks this withdrawal as refunded
-          const linkedRefund = refundByOriginalId[t.id];
-          if (linkedRefund) {
-            status = "Refunded";
-            if (!rejectReason) {
-              rejectReason = linkedRefund.metadata?.reason || "Details rejected by admin";
-            }
+      // Merge any withdraw requests from Firebase not yet in Supabase ledger
+      Object.keys(fbData).forEach((key) => {
+        if (!seenWithdrawalIds.has(key)) {
+          seenWithdrawalIds.add(key);
+          const req = fbData[key];
+          let reqTime = req.timestamp;
+          if (!reqTime && req.paidAt) reqTime = new Date(req.paidAt).getTime();
+          if (!reqTime && req.date) {
+            const parts = String(req.date).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+            if (parts) reqTime = new Date(`${parts[3]}-${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}`).getTime();
+            else reqTime = new Date(req.date).getTime();
           }
 
           formattedHistory.push({
-            id: t.id,
-            type: t.transaction_type,
-            coins: parseFloat(t.amount),
-            status: status,
-            rejectReason: rejectReason,
-            utrId: utrId,
-            paidAt: paidAt,
-            paymentMethod: paymentMethod,
-            date: new Date(t.created_at).toLocaleString(),
+            id: key,
+            type: "Withdrawal",
+            coins: -Math.abs(parseFloat(req.coins || 0)),
+            status: req.status || "Pending",
+            rejectReason: req.rejectReason || null,
+            utrId: req.utrId || null,
+            paidAt: req.paidAt || null,
+            paymentMethod: req.paymentMethod || (req.upi?.toLowerCase().includes("paypal") ? "PayPal" : "UPI"),
+            date: req.date || (req.timestamp ? new Date(req.timestamp).toLocaleString() : new Date().toLocaleString()),
+            timestamp: typeof reqTime === "number" && !isNaN(reqTime) ? reqTime : 0,
           });
-        });
+        }
+      });
 
-        setHistory(formattedHistory);
-        // Persist for offline view
-        await AsyncStorage.setItem("COIN_HISTORY", JSON.stringify(formattedHistory));
-      }
+      // Sort with current date and time on top (newest first)
+      formattedHistory.sort((a, b) => {
+        const timeA = (typeof a.timestamp === "number" && a.timestamp > 0)
+          ? a.timestamp
+          : (a.paidAt ? new Date(a.paidAt).getTime() : 0);
+        const timeB = (typeof b.timestamp === "number" && b.timestamp > 0)
+          ? b.timestamp
+          : (b.paidAt ? new Date(b.paidAt).getTime() : 0);
+        return timeB - timeA;
+      });
+
+      setHistory(formattedHistory);
+      // Persist for offline view
+      await AsyncStorage.setItem("COIN_HISTORY", JSON.stringify(formattedHistory));
     } catch (e) {
       console.log("Supabase Wallet Fetch Error:", e);
     }
@@ -442,6 +488,7 @@ export default function WalletScreen() {
 
   const renderItem = ({ item }) => {
     const isRefunded = item.status === "Refunded";
+    const isPaid = item.status === "Paid";
     return (
       <TouchableOpacity 
         style={styles.historyItem} 
@@ -459,7 +506,7 @@ export default function WalletScreen() {
           <View style={{ marginTop: 4 }}>
             <Text
               style={{
-                color: item.status === "Paid" ? "#22c55e" : 
+                color: isPaid ? "#22c55e" : 
                        (isRefunded ? "#38bdf8" : (item.status === "Rejected" ? "#ef4444" : "#facc15")),
                 fontSize: 12,
                 fontWeight: "900",
@@ -468,6 +515,23 @@ export default function WalletScreen() {
             >
               • {item.status}
             </Text>
+
+            {/* Admin Paid Information on card */}
+            {isPaid && (
+              <View style={{ marginTop: 3 }}>
+                {item.utrId ? (
+                  <Text style={{ color: "#38bdf8", fontSize: 11, fontWeight: "700" }}>
+                    {(item.paymentMethod === "PayPal" ? "PayPal Trans ID: " : "UTR / Ref: ") + item.utrId}
+                  </Text>
+                ) : null}
+                {item.paidAt ? (
+                  <Text style={{ color: "#9ca3af", fontSize: 10, fontWeight: "500", marginTop: 1 }}>
+                    Paid on: {new Date(item.paidAt).toLocaleString()}
+                  </Text>
+                ) : null}
+              </View>
+            )}
+
             {item.rejectReason && (
               <Text style={{ color: "#ef4444", fontSize: 11, fontWeight: "700", marginTop: 2 }}>
                 ⚠️ {item.rejectReason}
@@ -786,7 +850,7 @@ export default function WalletScreen() {
                     <View style={styles.detailRow}>
                       <Text style={styles.detailLabel}>Paid At:</Text>
                       <Text style={styles.detailValue}>
-                        {selectedTransaction.paidAt ? new Date(selectedTransaction.paidAt).toLocaleString() : "N/A"}
+                        {selectedTransaction.paidAt ? new Date(selectedTransaction.paidAt).toLocaleString() : (selectedTransaction.date || "Completed")}
                       </Text>
                     </View>
                     <View style={styles.detailRow}>
@@ -794,7 +858,7 @@ export default function WalletScreen() {
                         {selectedTransaction.paymentMethod === "PayPal" ? "PayPal Trans ID:" : "UTR ID:"}
                       </Text>
                       <Text style={[styles.detailValue, { color: "#38bdf8", fontWeight: "bold" }]}>
-                        {selectedTransaction.utrId || "Processing"}
+                        {selectedTransaction.utrId || "Confirmed"}
                       </Text>
                     </View>
                   </>
