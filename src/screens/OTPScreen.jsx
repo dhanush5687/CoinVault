@@ -118,11 +118,26 @@ export default function OTPScreen({ navigation, route }) {
       if (cleanPhone.endsWith("8885551616") && finalOtp === "885687") {
         console.log("Admin Logged In via 885687");
         const AsyncStorage = require("@react-native-async-storage/async-storage").default;
+        const { supabase } = require("../config/supabase");
+        let adminId = "0df4fcd8-adcf-4fd5-b37f-52d3bd2fe97a";
+        let displayName = "Dhanu";
+        try {
+          const { data } = await supabase
+            .from("profiles")
+            .select("id, display_name")
+            .or("email.eq.dhanushraj5687@gmail.com,mobile.eq.8885551616,phone.eq.8885551616")
+            .maybeSingle();
+          if (data?.id) {
+            adminId = data.id;
+            displayName = data.display_name || displayName;
+          }
+        } catch (_) {}
+
         const adminProfile = {
-          id: "0df4fcd8-adcf-4fd5-b37f-52d3bd2fe97a",
+          id: adminId,
           email: "dhanushraj5687@gmail.com",
-          display_name: "Dhanu",
-          name: "Dhanu",
+          display_name: displayName,
+          name: displayName,
           phone: "8885551616",
           mobile: "8885551616",
           role: "admin",
