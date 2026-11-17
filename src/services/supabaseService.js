@@ -402,24 +402,19 @@ export const signOut = async () => {
 export const isCurrentUserAdmin = async () => {
   try {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return false;
-
-    // Check profiles table for admin role or is_admin flag
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('is_admin, role, phone, email')
-      .eq('id', user.id)
-      .single();
-
-    if (!error && data) {
-      if (data.is_admin === true || data.role === 'admin') {
+    if (user) {
+      if (user.phone?.includes("8885551616") || user.email === "dhanushraj5687@gmail.com" || user.email === "nanil5687@gmail.com" || user.user_metadata?.is_admin === true) {
         return true;
       }
     }
 
-    // Verify phone or email against verified user session
-    if (user.phone === "+918885551616" || user.user_metadata?.is_admin === true) {
-      return true;
+    const AsyncStorage = require("@react-native-async-storage/async-storage").default;
+    const cached = await AsyncStorage.getItem("USER_PROFILE");
+    if (cached) {
+      const p = JSON.parse(cached);
+      if (p.mobile?.includes("8885551616") || p.phone?.includes("8885551616") || p.email === "dhanushraj5687@gmail.com" || p.role === "admin" || p.is_admin === true || p.id === "0df4fcd8-adcf-4fd5-b37f-52d3bd2fe97a") {
+        return true;
+      }
     }
 
     return false;
