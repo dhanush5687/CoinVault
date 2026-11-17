@@ -18,7 +18,7 @@
 // });
 
 import auth from "@react-native-firebase/auth";
-import { saveUserToDB } from "../auth/saveUserToDB";
+import { saveUserToDB } from "./saveUserToDB";
 
 const sendOTP = async (phone) => {
   const confirmation = await auth().signInWithPhoneNumber(phone);

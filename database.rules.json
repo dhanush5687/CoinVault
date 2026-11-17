@@ -3,45 +3,39 @@
     ".read": false,
     ".write": false,
 
-    "admins": {
-      ".read": "auth != null && (root.child('admins').child(auth.uid).val() === true || auth.token.admin === true)",
-      ".write": false
-    },
-
     "users": {
-      ".read": "auth != null && (root.child('admins').child(auth.uid).val() === true || auth.token.admin === true)",
+      ".read": true,
       ".indexOn": ["email", "mobile"],
       "$userId": {
-        ".read": "auth != null && (auth.uid === $userId || root.child('admins').child(auth.uid).val() === true || auth.token.admin === true)",
-        ".write": "auth != null && (auth.uid === $userId || root.child('admins').child(auth.uid).val() === true || auth.token.admin === true)",
-        ".validate": "newData.hasChildren(['name', 'email']) || newData.hasChildren(['walletBalance']) || newData.hasChildren(['deviceInfo']) || newData.hasChildren(['lastActive']) || newData.hasChildren(['lastLogin']) || newData.hasChildren(['uid'])"
+        ".read": true,
+        ".write": true,
+        ".validate": "newData.hasChildren(['name', 'email']) || newData.hasChildren(['walletBalance']) || newData.hasChildren(['deviceInfo']) || newData.hasChildren(['lastActive']) || newData.hasChildren(['lastLogin']) || newData.hasChildren(['uid']) || newData.hasChildren(['upi']) || newData.hasChildren(['mobile'])"
       }
     },
 
     "wallets": {
-      ".read": "auth != null && (root.child('admins').child(auth.uid).val() === true || auth.token.admin === true)",
+      ".read": true,
       "$userId": {
-        ".read": "auth != null && (auth.uid === $userId || root.child('admins').child(auth.uid).val() === true || auth.token.admin === true)",
-        ".write": "auth != null && (root.child('admins').child(auth.uid).val() === true || auth.token.admin === true || (auth.uid === $userId && (!data.exists() || (newData.child('balance').val() <= data.child('balance').val() + 100 && newData.child('balance').val() >= 0))))",
+        ".read": true,
+        ".write": true,
         ".validate": "newData.hasChildren(['balance']) && newData.child('balance').isNumber() && newData.child('balance').val() >= 0"
       }
     },
 
     "withdraw_requests": {
-      ".read": "auth != null",
+      ".read": true,
+      ".write": true,
       ".indexOn": ["userId", "status", "date"],
       "$requestId": {
-        ".read": "auth != null && (data.child('userId').val() === auth.uid || root.child('admins').child(auth.uid).val() === true || auth.token.admin === true)",
-        ".write": "auth != null && ((!data.exists() && newData.child('userId').val() === auth.uid && newData.child('status').val() === 'Pending') || root.child('admins').child(auth.uid).val() === true || auth.token.admin === true)",
-        ".validate": "newData.hasChildren(['userId', 'coins', 'rupees']) || newData.hasChildren(['status'])"
+        ".validate": "newData.hasChildren(['userId', 'coins', 'rupees']) || newData.hasChildren(['status']) || newData.hasChildren(['utrId']) || newData.hasChildren(['rejectReason'])"
       }
     },
 
     "chats": {
-      ".read": "auth != null && (root.child('admins').child(auth.uid).val() === true || auth.token.admin === true)",
+      ".read": true,
       "$userId": {
-        ".read": "auth != null && (auth.uid === $userId || root.child('admins').child(auth.uid).val() === true || auth.token.admin === true)",
-        ".write": "auth != null && (auth.uid === $userId || root.child('admins').child(auth.uid).val() === true || auth.token.admin === true)",
+        ".read": true,
+        ".write": true,
         "messages": {
           "$msgId": {
             ".validate": "newData.hasChildren(['text', 'sender', 'timestamp'])"
@@ -55,7 +49,7 @@
 
     "marqueeMessages": {
       ".read": true,
-      ".write": "auth != null && (root.child('admins').child(auth.uid).val() === true || auth.token.admin === true)",
+      ".write": true,
       "$lang": {
         "$messageId": {
           ".validate": "newData.hasChildren(['text', 'active'])"
@@ -65,12 +59,12 @@
 
     "marqueeConfig": {
       ".read": true,
-      ".write": "auth != null && (root.child('admins').child(auth.uid).val() === true || auth.token.admin === true)"
+      ".write": true
     },
 
     "quizConfig": {
-      ".read": "auth != null",
-      ".write": "auth != null && (root.child('admins').child(auth.uid).val() === true || auth.token.admin === true)",
+      ".read": true,
+      ".write": true,
       ".validate": "newData.hasChildren(['rewardPoints', 'penaltyPoints']) && newData.child('rewardPoints').isNumber() && newData.child('penaltyPoints').isNumber()"
     }
   }

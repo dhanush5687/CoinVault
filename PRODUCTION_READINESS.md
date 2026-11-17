@@ -146,3 +146,4 @@ What's New in Version 1.8:
 - Improved Daily Bonus wheel with anti-tamper cooldown timer.
 - UI bug fixes, dark theme enhancements, and performance optimizations.
 ```
+

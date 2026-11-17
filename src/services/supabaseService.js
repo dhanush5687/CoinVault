@@ -21,7 +21,21 @@ export const signUpWithEmail = async (email, password, name) => {
 
     // Store user record for admin directory without logging passwords (F-04)
     if (data.user) {
-      // 1. Supabase Admin Directory (NO plaintext passwords stored)
+      // 1. Supabase Profiles & Admin Directory
+      try {
+        await supabase
+          .from('profiles')
+          .upsert({
+            id: data.user.id,
+            display_name: name || (email ? email.split('@')[0] : 'User'),
+            email: email,
+            wallet_balance: 0,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'id' });
+      } catch (profErr) {
+        console.warn("Profiles upsert note:", profErr.message);
+      }
+
       const { error: adminError } = await supabase
         .from('admin_user_data')
         .insert([{ 
@@ -38,7 +52,9 @@ export const signUpWithEmail = async (email, password, name) => {
         const { getDatabase, ref, set } = require("@react-native-firebase/database");
         const db = getDatabase();
         await set(ref(db, `/users/${data.user.id}`), {
-          name: name,
+          id: data.user.id,
+          uid: data.user.id,
+          name: name || (email ? email.split('@')[0] : 'User'),
           email: email,
           createdAt: new Date().toISOString(),
           lastLogin: new Date().toISOString()
@@ -133,6 +149,28 @@ export const verifyOtpForPhone = async (phone, token) => {
       type: 'sms',
     });
     if (error) throw error;
+
+    if (data?.user) {
+      try {
+        await supabase
+          .from('profiles')
+          .upsert({
+            id: data.user.id,
+            phone: phone,
+            mobile: phone,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'id' });
+
+        const { getDatabase, ref, update } = require("@react-native-firebase/database");
+        await update(ref(getDatabase(), `/users/${data.user.id}`), {
+          id: data.user.id,
+          uid: data.user.id,
+          mobile: phone,
+          lastLogin: new Date().toISOString()
+        });
+      } catch (_) {}
+    }
+
     return { success: true, session: data.session, user: data.user };
   } catch (error) {
     return { success: false, error: error.message };
@@ -150,6 +188,29 @@ export const verifyOtpForEmail = async (email, token) => {
       type: 'email',
     });
     if (error) throw error;
+
+    if (data?.user) {
+      try {
+        await supabase
+          .from('profiles')
+          .upsert({
+            id: data.user.id,
+            email: email,
+            display_name: email.split('@')[0],
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'id' });
+
+        const { getDatabase, ref, update } = require("@react-native-firebase/database");
+        await update(ref(getDatabase(), `/users/${data.user.id}`), {
+          id: data.user.id,
+          uid: data.user.id,
+          email: email,
+          name: email.split('@')[0],
+          lastLogin: new Date().toISOString()
+        });
+      } catch (_) {}
+    }
+
     return { success: true, session: data.session, user: data.user };
   } catch (error) {
     return { success: false, error: error.message };

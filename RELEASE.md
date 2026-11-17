@@ -97,3 +97,4 @@ If a critical crash or issue is reported:
    npx hot-updater console
    ```
 2. Disable the active deployment or roll back to the prior stable bundle version with 1 click.
+
