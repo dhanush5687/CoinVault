@@ -26,6 +26,7 @@ import { subscribeToSupportChat } from "../services/chatService";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { BannerAd, BannerAdSize } from "react-native-google-mobile-ads";
 import { ADMOB_BANNER_ID, VERSION_NAME } from "@env";
+import AdmobBannerCard from "../components/AdmobBannerCard";
 import { showAppOpenAd } from "../ads/AppOpenManager";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback } from "react";
@@ -167,6 +168,21 @@ export default function ProfileScreen({ navigation }) {
                 };
                 await AsyncStorage.setItem("USER_PROFILE", JSON.stringify(profileData));
 
+                // 3. Sync to Firebase for Admin Panel
+                try {
+                    const { getDatabase, ref: fbRef, update: fbUpdate } = require("@react-native-firebase/database");
+                    const db = getDatabase();
+                    await fbUpdate(fbRef(db, `/users/${user.id}`), {
+                        name,
+                        mobile,
+                        upi,
+                        country,
+                        email: user.email
+                    });
+                } catch (fbErr) {
+                    console.log("Firebase sync error:", fbErr);
+                }
+
                 Alert.alert(
                     "Success",
                     "Profile Updated Successfully!",
@@ -300,7 +316,7 @@ export default function ProfileScreen({ navigation }) {
             <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 150 }}>
                 {/* Top Banner */}
                 <View style={{ alignItems: "center", marginBottom: 10 }}>
-                    <BannerAd unitId={ADMOB_BANNER_ID} size={BannerAdSize.ADAPTIVE_BANNER} />
+                    <AdmobBannerCard asCard={false} />
                 </View>
 
             <Text style={styles.title}>Create / Update Profile</Text>
@@ -423,7 +439,7 @@ export default function ProfileScreen({ navigation }) {
 
             {/* Bottom Banner */}
             <View style={{ alignItems: "center", marginTop: 20 }}>
-                <BannerAd unitId={ADMOB_BANNER_ID} size={BannerAdSize.ADAPTIVE_BANNER} />
+                <AdmobBannerCard asCard={false} />
             </View>
             {/* Contact Us Modal */}
             <Modal
@@ -674,6 +690,10 @@ const styles = StyleSheet.create({
         color: '#64748b',
         fontSize: 12,
         marginTop: 20,
+    },
+    detail: {
+        color: "#94a3b8",
+        fontSize: 14,
     },
     inputHelpText: {
         color: "#94a3b8",

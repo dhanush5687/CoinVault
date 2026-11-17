@@ -28,6 +28,7 @@ import {
   ADMOB_BANNER_ID,
 
 } from "@env";
+import AdmobBannerCard from "../components/AdmobBannerCard";
 
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 
@@ -307,13 +308,7 @@ export default function DailyBonusScreen({ navigation }) {
 
       {/* ✅ BANNER AD (BOTTOM SAFE ZONE) */}
       <View style={styles.adContainer}>
-        <BannerAd
-          unitId={BANNER_ID}
-          size={BannerAdSize.ADAPTIVE_BANNER}
-          requestOptions={{
-            requestNonPersonalizedAdsOnly: true,
-          }}
-        />
+        <AdmobBannerCard asCard={false} />
       </View>
     </SafeAreaView>
   );

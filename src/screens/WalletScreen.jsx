@@ -19,18 +19,22 @@ import { supabase } from "../config/supabase";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { BannerAd, BannerAdSize } from "react-native-google-mobile-ads";
 import { ADMOB_BANNER_ID } from "@env";
+import AdmobBannerCard from "../components/AdmobBannerCard";
 import { showAppOpenAd } from "../ads/AppOpenManager";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback } from "react";
 
-const COIN_RATE = 0.01;     // 1 coin = ₹0.01
-const MIN_WITHDRAW = 500;  // ₹5
-const MAX_WITHDRAW = 10000;// ₹100
+const COIN_RATE = 0.01;            // 1 coin = ₹0.01 INR
+const USD_RATE = 0.48 / 45;        // ₹45 INR = $0.48 USD (1 INR ≈ $0.01067 USD)
+const MIN_WITHDRAW_UPI = 500;      // 500 coins = ₹5 INR
+const MIN_WITHDRAW_USD = 4500;     // 4,500 coins = $0.48 USD
+const MAX_WITHDRAW = 10000;        // ₹100 INR / $1.07 USD
 
 export default function WalletScreen() {
   const [coins, setCoins] = useState(0);
   const [history, setHistory] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [userCountry, setUserCountry] = useState("India");
 
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [withdrawCoins, setWithdrawCoins] = useState("");
@@ -40,6 +44,9 @@ export default function WalletScreen() {
   const [payoutType, setPayoutType] = useState("UPI");
   const [loading, setLoading] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
+
+  const getINR = (c) => (c * COIN_RATE).toFixed(2);
+  const getUSD = (c) => (c * COIN_RATE * USD_RATE).toFixed(2);
 
   useEffect(() => {
     fetchWalletData();
@@ -69,10 +76,11 @@ export default function WalletScreen() {
         setCoins(parseFloat(walletData.balance) || 0);
       }
 
-      // Fetch Profile for prefill and balance fallback
+      // Fetch Profile for prefill, country, and balance fallback
+      let userMobile = "";
       const { data: profile } = await supabase
         .from("profiles")
-        .select("wallet_balance, display_name, mobile, phone, upi_id")
+        .select("wallet_balance, display_name, mobile, phone, upi_id, country")
         .eq("id", user.id)
         .single();
 
@@ -81,11 +89,14 @@ export default function WalletScreen() {
           setCoins(parseFloat(profile.wallet_balance) || 0);
         }
         if (profile.display_name) setName((prev) => prev || profile.display_name);
-        if (profile.mobile || profile.phone) setMobile((prev) => prev || profile.mobile || profile.phone);
+        if (profile.mobile || profile.phone) {
+          userMobile = profile.mobile || profile.phone;
+          setMobile((prev) => prev || userMobile);
+        }
         if (profile.upi_id) {
           setUpi((prev) => prev || profile.upi_id);
           const savedUpi = profile.upi_id.toLowerCase();
-          if (savedUpi.includes("paypal") || (!savedUpi.includes("ok") && !savedUpi.includes("upi") && !savedUpi.includes("paytm") && savedUpi.includes("@"))) {
+          if (savedUpi.includes("paypal")) {
             setPayoutType("PayPal");
           }
         }
@@ -94,13 +105,50 @@ export default function WalletScreen() {
         if (localProf) {
           const lp = JSON.parse(localProf);
           if (lp.name) setName((prev) => prev || lp.name);
-          if (lp.mobile) setMobile((prev) => prev || lp.mobile);
+          if (lp.mobile) {
+            userMobile = lp.mobile;
+            setMobile((prev) => prev || lp.mobile);
+          }
           if (lp.upi) {
             setUpi((prev) => prev || lp.upi);
             if (lp.upi.toLowerCase().includes("paypal")) setPayoutType("PayPal");
           }
         }
       }
+
+      // Smart country & region auto-detection:
+      // Prioritize physical location indicators (carrier, IP, Indian mobile format)
+      try {
+        const DeviceInfo = require("react-native-device-info").default;
+        const carrier = await DeviceInfo.getCarrier().catch(() => "");
+        const isIndianCarrier = /jio|airtel|vi|vodafone|idea|bsnl|mtnl/i.test(carrier || "");
+        const isIndianMobile = userMobile.startsWith("+91") || (userMobile.length === 10 && /^[6-9]/.test(userMobile));
+        const cachedDetectedCountry = await AsyncStorage.getItem("DETECTED_COUNTRY");
+
+        let resolvedCountry = "India";
+        if (isIndianCarrier || isIndianMobile) {
+          // If carrier (e.g. Jio True5G) or mobile (+91) is clearly Indian, user is in India
+          resolvedCountry = "India";
+        } else if (cachedDetectedCountry) {
+          resolvedCountry = cachedDetectedCountry;
+        } else if (profile?.country) {
+          resolvedCountry = profile.country;
+        } else {
+          const devCountry = await DeviceInfo.getCountry().catch(() => "");
+          if (devCountry === "IN" || devCountry === "India") {
+            resolvedCountry = "India";
+          } else if (devCountry) {
+            resolvedCountry = devCountry === "US" ? "USA" : devCountry;
+          }
+        }
+
+        setUserCountry(resolvedCountry);
+        if (resolvedCountry !== "India") {
+          setPayoutType("PayPal");
+        } else {
+          setPayoutType("UPI");
+        }
+      } catch (_) {}
 
       // Fetch Transaction History
       const { data: transactions, error: tError } = await supabase
@@ -264,18 +312,22 @@ export default function WalletScreen() {
       return;
     }
 
-    if (amount < MIN_WITHDRAW) {
-      alert(`Minimum withdraw is ${MIN_WITHDRAW} coins (₹5)`);
+    const isPayPal = payoutType === "PayPal";
+    const minAmount = isPayPal ? MIN_WITHDRAW_USD : MIN_WITHDRAW_UPI;
+    const minDisplay = isPayPal ? "4,500 coins ($0.48 USD)" : "500 coins (₹5 INR)";
+
+    if (amount < minAmount) {
+      alert(`Minimum withdraw for ${isPayPal ? "PayPal (USD)" : "UPI (INR)"} is ${minDisplay}`);
       return;
     }
 
     if (amount > MAX_WITHDRAW) {
-      alert(`Maximum withdraw is ${MAX_WITHDRAW} coins (₹100)`);
+      alert(`Maximum withdraw is ${MAX_WITHDRAW} coins (${isPayPal ? "$1.07 USD" : "₹100 INR"})`);
       return;
     }
 
     if (amount % 500 !== 0) {
-      alert("Withdraw only in multiples of 500 (500, 1000, 1500...)");
+      alert("Withdraw only in multiples of 500 (500, 1000, 1500... or 4500, 5000...)");
       return;
     }
 
@@ -285,7 +337,7 @@ export default function WalletScreen() {
     }
 
     if (!name || !mobile || !upi) {
-      alert(`Please enter Name, Mobile & ${payoutType === "PayPal" ? "PayPal ID" : "UPI ID"}`);
+      alert(`Please enter Name, Mobile & ${isPayPal ? "PayPal ID" : "UPI ID"}`);
       return;
     }
 
@@ -305,8 +357,11 @@ export default function WalletScreen() {
 
       if (pError) throw pError;
 
-      const isPayPal = payoutType === "PayPal" || (upi.includes("@") && !upi.toLowerCase().includes("ok") && !upi.toLowerCase().includes("upi") && !upi.toLowerCase().includes("paytm"));
       const paymentMethod = isPayPal ? "PayPal" : "UPI";
+      const inrAmount = getINR(amount);
+      const usdAmount = getUSD(amount);
+      const currency = isPayPal ? "USD" : "INR";
+      const displayAmount = isPayPal ? `$${usdAmount} USD` : `₹${inrAmount}`;
 
       // 2. Create Transaction Record (Supabase)
       const { data: trans, error: tError } = await supabase
@@ -316,8 +371,19 @@ export default function WalletScreen() {
           transaction_type: "Withdrawal",
           amount: -amount,
           balance_after: newBalance,
-          description: `Withdrawal via ${paymentMethod}: ${upi}`,
-          metadata: { name, mobile, upi, paymentMethod, status: "Pending" }
+          description: `Withdrawal via ${paymentMethod}: ${displayAmount} (${upi})`,
+          metadata: {
+            name,
+            mobile,
+            upi,
+            paymentMethod,
+            status: "Pending",
+            currency,
+            rupees: inrAmount,
+            usdAmount: usdAmount,
+            displayAmount,
+            country: userCountry
+          }
         }])
         .select()
         .single();
@@ -336,7 +402,11 @@ export default function WalletScreen() {
           upi: upi,
           paymentMethod: paymentMethod,
           coins: amount,
-          rupees: (amount / 100).toFixed(2), // Assuming 100 coins = 1 Rupee
+          rupees: inrAmount,
+          usdAmount: usdAmount,
+          currency: currency,
+          displayAmount: displayAmount,
+          country: userCountry,
           status: "Pending",
           date: new Date().toLocaleString(),
           timestamp: Date.now()
@@ -346,6 +416,18 @@ export default function WalletScreen() {
           balance: newBalance,
           lastUpdated: Date.now()
         });
+        // Sync user UPI & mobile to Firebase user record for Admin Panel
+        await update(fbRef(db, `/users/${user.id}`), {
+          upi: upi,
+          mobile: mobile,
+          name: name
+        });
+        // Also persist UPI into Supabase profile
+        await supabase.from("profiles").update({
+          upi_id: upi,
+          mobile: mobile,
+          display_name: name
+        }).eq("id", user.id);
       } catch (fbError) {
         console.warn("Firebase Sync Error:", fbError.message);
         // Don't fail the whole request if only Firebase sync fails
@@ -353,22 +435,10 @@ export default function WalletScreen() {
 
       // Update UI
       setCoins(newBalance);
-      const historyItem = {
-        id: trans.id,
-        type: "Withdrawal",
-        coins: -amount,
-        status: "Pending",
-        date: new Date().toLocaleString(),
-      };
-      setHistory([historyItem, ...history]);
-
       setWithdrawCoins("");
-      setName("");
-      setMobile("");
-      setUpi("");
       setShowWithdraw(false);
-
-      alert("Withdraw request submitted successfully!");
+      alert(`Withdrawal request for ${displayAmount} submitted successfully!`);
+      await fetchWalletData();
     } catch (e) {
       console.log("Withdrawal Error:", e);
       alert("Withdrawal failed: " + e.message);
@@ -418,20 +488,25 @@ export default function WalletScreen() {
           </View>
         </View>
         <View style={{ alignItems: "flex-end", justifyContent: "center" }}>
-          <Text
-            style={[
-              styles.historyCoins,
-              { color: isRefunded ? "#38bdf8" : (item.coins > 0 ? "#22c55e" : "#ef4444") },
-            ]}
-          >
-            {isRefunded ? `+${Math.abs(item.coins)}` : (item.coins > 0 ? "+" : "") + item.coins}
-          </Text>
-          <MaterialCommunityIcons 
-            name={isRefunded ? "cash-refund" : "database-arrow-up"} 
-            size={16} 
-            color={isRefunded ? "#38bdf8" : (item.coins > 0 ? "#22c55e" : "#ef4444")} 
-            style={{ marginLeft: 4 }} 
-          />
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <Text
+              style={[
+                styles.historyCoins,
+                { color: isRefunded ? "#38bdf8" : (item.coins > 0 ? "#22c55e" : "#ef4444") },
+              ]}
+            >
+              {isRefunded ? `+${Math.abs(item.coins)}` : (item.coins > 0 ? "+" : "") + item.coins}
+            </Text>
+            <Text style={[styles.historyCoinsUnit, { color: isRefunded ? "#38bdf8" : (item.coins > 0 ? "#22c55e" : "#ef4444") }]}>
+              {" "}Coins
+            </Text>
+            <MaterialCommunityIcons 
+              name={isRefunded ? "cash-refund" : (item.coins > 0 ? "database-arrow-up" : "database-arrow-down")} 
+              size={16} 
+              color={isRefunded ? "#38bdf8" : (item.coins > 0 ? "#22c55e" : "#ef4444")} 
+              style={{ marginLeft: 4 }} 
+            />
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -439,22 +514,39 @@ export default function WalletScreen() {
 
   return (
     <SafeAreaView edges={['top']} style={styles.container}>
-      {/* Top Banner */}
-      <View style={{ alignItems: "center", marginBottom: 5 }}>
-        <BannerAd unitId={ADMOB_BANNER_ID} size={BannerAdSize.ADAPTIVE_BANNER} />
-      </View>
-
       {/* Balance */}
       <View style={styles.balanceCard}>
-        <Text style={styles.balanceTitle}>Wallet Balance</Text>
+        <TouchableOpacity
+          style={styles.countryPillRow}
+          onPress={() => {
+            const nextCountry = userCountry === "India" ? "USA" : "India";
+            setUserCountry(nextCountry);
+            setPayoutType(nextCountry === "India" ? "UPI" : "PayPal");
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.countryPill}>
+            {userCountry === "India" ? "🇮🇳 India Region (Tap to Switch)" : `🌐 ${userCountry || "USA"} Region (Tap to Switch)`}
+          </Text>
+        </TouchableOpacity>
+
+        <Text style={[styles.balanceTitle, { color: "#9ca3af" }]}>Wallet Balance</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={styles.balance}>{coins}</Text>
+          <Text style={[styles.balance, { color: "#22c55e" }]}>{coins}</Text>
           <MaterialCommunityIcons name="database" size={30} color="#22c55e" style={{ marginLeft: 8 }} />
         </View>
-        <Text style={styles.rupees}>₹ {(coins * COIN_RATE).toFixed(2)}</Text>
-        <Text style={styles.rateText}>
-          500 = ₹5 | 1000 = ₹10 | Min 500 | Max 10,000
-        </Text>
+
+        {userCountry === "India" ? (
+          <View style={styles.currencyRow}>
+            <Text style={styles.rupees}>₹ {getINR(coins)}</Text>
+            <Text style={styles.usdSubText}>≈ ${getUSD(coins)} USD</Text>
+          </View>
+        ) : (
+          <View style={styles.currencyRow}>
+            <Text style={styles.rupees}>${getUSD(coins)} USD</Text>
+            <Text style={styles.usdSubText}>≈ ₹ {getINR(coins)}</Text>
+          </View>
+        )}
       </View>
 
       {/* Withdraw Button */}
@@ -464,7 +556,7 @@ export default function WalletScreen() {
       >
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <MaterialCommunityIcons name="cash-fast" size={20} color="#fff" style={{ marginRight: 8 }} />
-          <Text style={styles.withdrawMainText}>Withdraw Coins</Text>
+          <Text style={styles.withdrawMainText}>Withdraw Coins ({coins} Available)</Text>
         </View>
       </TouchableOpacity>
 
@@ -486,15 +578,79 @@ export default function WalletScreen() {
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Withdraw Coins</Text>
 
-            <ScrollView>
+            {/* Available Coins Card inside Modal */}
+            <View style={styles.modalBalanceBox}>
+              <Text style={styles.modalBalanceLabel}>Available Coins Balance</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                <Text style={styles.modalBalanceNumber}>{coins}</Text>
+                <Text style={styles.modalBalanceUnit}> Coins</Text>
+                <MaterialCommunityIcons name="database" size={20} color="#22c55e" style={{ marginLeft: 6 }} />
+              </View>
+              <Text style={styles.modalBalanceEquivalent}>
+                ≈ {userCountry === "India" ? `₹${getINR(coins)} INR ($${getUSD(coins)} USD)` : `$${getUSD(coins)} USD (₹${getINR(coins)})`}
+              </Text>
+            </View>
+
+            {/* Quick Coin Chips */}
+            <View style={styles.quickChipsRow}>
+              {(payoutType === "PayPal" ? [4500, 5000, 10000] : [500, 1000, 2000]).map((c) => (
+                <TouchableOpacity
+                  key={c}
+                  style={[styles.quickChip, withdrawCoins === String(c) && styles.quickChipActive]}
+                  onPress={() => setWithdrawCoins(String(c))}
+                >
+                  <Text style={[styles.quickChipText, withdrawCoins === String(c) && styles.quickChipTextActive]}>
+                    {c}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity
+                style={[styles.quickChip, withdrawCoins === String(coins) && styles.quickChipActive]}
+                onPress={() => setWithdrawCoins(String(Math.min(coins, MAX_WITHDRAW)))}
+              >
+                <Text style={[styles.quickChipText, withdrawCoins === String(coins) && styles.quickChipTextActive]}>
+                  All ({coins})
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
               <TextInput
-                placeholder="Coins (500, 1000, 1500...)"
+                placeholder={
+                  payoutType === "PayPal"
+                    ? "Coins (Min 4500 = $0.48 USD)"
+                    : "Coins (Min 500 = ₹5 INR)"
+                }
                 placeholderTextColor="#777"
                 keyboardType="number-pad"
                 value={withdrawCoins}
                 onChangeText={setWithdrawCoins}
                 style={styles.input}
               />
+
+              {/* Live Auto-Conversion Display */}
+              {withdrawCoins && !isNaN(parseInt(withdrawCoins)) && parseInt(withdrawCoins) > 0 ? (
+                <View style={styles.conversionBox}>
+                  <MaterialCommunityIcons
+                    name="currency-usd"
+                    size={16}
+                    color="#38bdf8"
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={styles.conversionText}>
+                    {payoutType === "PayPal" ? (
+                      <>
+                        Auto-Converts to: <Text style={styles.conversionValue}>${getUSD(parseInt(withdrawCoins))} USD</Text> (≈ ₹{getINR(parseInt(withdrawCoins))})
+                      </>
+                    ) : (
+                      <>
+                        Auto-Converts to: <Text style={styles.conversionValue}>₹{getINR(parseInt(withdrawCoins))} INR</Text> (≈ ${getUSD(parseInt(withdrawCoins))} USD)
+                      </>
+                    )}
+                  </Text>
+                </View>
+              ) : null}
+
               <TextInput
                 placeholder="Full Name"
                 placeholderTextColor="#777"
@@ -526,7 +682,7 @@ export default function WalletScreen() {
                       style={{ marginRight: 6 }}
                     />
                     <Text style={[styles.payoutToggleText, payoutType === "UPI" && styles.payoutToggleActiveText]}>
-                      UPI ID
+                      UPI ID (INR)
                     </Text>
                   </TouchableOpacity>
 
@@ -542,9 +698,18 @@ export default function WalletScreen() {
                       style={{ marginRight: 6 }}
                     />
                     <Text style={[styles.payoutToggleText, payoutType === "PayPal" && styles.payoutToggleActiveText]}>
-                      PayPal ID
+                      PayPal (USD)
                     </Text>
                   </TouchableOpacity>
+                </View>
+
+                {/* Min Withdraw Notice */}
+                <View style={styles.minNoticeBanner}>
+                  <Text style={styles.minNoticeText}>
+                    {payoutType === "PayPal"
+                      ? "🌐 PayPal (USD): Minimum withdrawal is 4,500 coins ($0.48 USD)"
+                      : "🇮🇳 UPI (INR): Minimum withdrawal is 500 coins (₹5.00)"}
+                  </Text>
                 </View>
               </View>
 
@@ -608,6 +773,15 @@ export default function WalletScreen() {
                   </Text>
                 </View>
 
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Amount:</Text>
+                  <Text style={[styles.detailValue, { color: "#22c55e", fontWeight: "bold" }]}>
+                    {selectedTransaction.paymentMethod === "PayPal"
+                      ? `$${getUSD(Math.abs(selectedTransaction.coins))} USD (${Math.abs(selectedTransaction.coins)} 🪙)`
+                      : `₹${getINR(Math.abs(selectedTransaction.coins))} (${Math.abs(selectedTransaction.coins)} 🪙)`}
+                  </Text>
+                </View>
+
                 {selectedTransaction.status === "Paid" && (
                   <>
                     <View style={styles.detailRow}>
@@ -643,8 +817,12 @@ export default function WalletScreen() {
                 )}
 
                 <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Amount:</Text>
-                  <Text style={styles.detailValue}>{Math.abs(selectedTransaction.coins)} 🪙 (₹{(Math.abs(selectedTransaction.coins) * 0.01).toFixed(2)})</Text>
+                  <Text style={styles.detailLabel}>Net Value:</Text>
+                  <Text style={[styles.detailValue, { color: "#38bdf8", fontWeight: "bold" }]}>
+                    {selectedTransaction.paymentMethod === "PayPal"
+                      ? `$${getUSD(Math.abs(selectedTransaction.coins))} USD (≈ ₹${getINR(Math.abs(selectedTransaction.coins))})`
+                      : `₹${getINR(Math.abs(selectedTransaction.coins))} (≈ $${getUSD(Math.abs(selectedTransaction.coins))} USD)`}
+                  </Text>
                 </View>
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Date:</Text>
@@ -665,7 +843,7 @@ export default function WalletScreen() {
 
       {/* Bottom Banner */}
       <View style={{ alignItems: "center", marginTop: 5, paddingBottom: 85 }}>
-        <BannerAd unitId={ADMOB_BANNER_ID} size={BannerAdSize.ADAPTIVE_BANNER} />
+        <AdmobBannerCard asCard={false} />
       </View>
     </SafeAreaView>
   );
@@ -684,10 +862,78 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 10,
   },
-  balanceTitle: { color: "#9ca3af" },
-  balance: { fontSize: 30, fontWeight: "700", color: "#22c55e" },
-  rupees: { color: "#facc15", marginTop: 4 },
-  rateText: { color: "#38bdf8", fontSize: 12, marginTop: 4 },
+  balanceTitle: {
+    color: "#9ca3af",
+    fontSize: 14,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  balance: {
+    fontSize: 32,
+    fontWeight: "800",
+    color: "#22c55e",
+  },
+  countryPillRow: {
+    marginBottom: 6,
+  },
+  countryPill: {
+    backgroundColor: "#1e293b",
+    color: "#38bdf8",
+    fontSize: 11,
+    fontWeight: "700",
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#334155",
+  },
+  currencyRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 4,
+  },
+  rupees: { color: "#facc15", fontSize: 20, fontWeight: "800" },
+  usdSubText: { color: "#38bdf8", fontSize: 14, fontWeight: "700" },
+  rateText: { color: "#94a3b8", fontSize: 12, marginTop: 6, textAlign: "center" },
+
+  conversionBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#082f49",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: "#0284c7",
+  },
+  conversionText: {
+    color: "#bae6fd",
+    fontSize: 12,
+    flex: 1,
+  },
+  conversionValue: {
+    color: "#38bdf8",
+    fontWeight: "900",
+    fontSize: 13,
+  },
+
+  minNoticeBanner: {
+    backgroundColor: "#0f172a",
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    marginTop: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: "#38bdf8",
+  },
+  minNoticeText: {
+    color: "#38bdf8",
+    fontSize: 11,
+    fontWeight: "700",
+  },
 
   withdrawMainBtn: {
     backgroundColor: "#2563eb",
@@ -716,6 +962,69 @@ const styles = StyleSheet.create({
   historyType: { color: "#fff", fontWeight: "600" },
   historyDate: { color: "#9ca3af", fontSize: 11 },
   historyCoins: { fontSize: 16, fontWeight: "700" },
+  historyCoinsUnit: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+  modalBalanceBox: {
+    backgroundColor: "#020617",
+    padding: 10,
+    borderRadius: 10,
+    alignItems: "center",
+    marginTop: 8,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: "#1e293b",
+  },
+  modalBalanceLabel: {
+    color: "#94a3b8",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  modalBalanceNumber: {
+    color: "#22c55e",
+    fontSize: 22,
+    fontWeight: "800",
+  },
+  modalBalanceUnit: {
+    color: "#22c55e",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  modalBalanceEquivalent: {
+    color: "#38bdf8",
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  quickChipsRow: {
+    flexDirection: "row",
+    gap: 6,
+    marginBottom: 6,
+  },
+  quickChip: {
+    flex: 1,
+    backgroundColor: "#1e293b",
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#334155",
+  },
+  quickChipActive: {
+    backgroundColor: "#22c55e",
+    borderColor: "#22c55e",
+  },
+  quickChipText: {
+    color: "#94a3b8",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  quickChipTextActive: {
+    color: "#000",
+    fontWeight: "800",
+  },
 
   modalOverlay: {
     flex: 1,

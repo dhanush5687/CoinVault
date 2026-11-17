@@ -26,6 +26,7 @@ import { supabase } from "../config/supabase";
 import { syncUserActivity } from "../services/supabaseService";
 import { subscribeToSupportChat } from "../services/chatService";
 import { QUIZ_CATEGORIES } from "./QuizScreen";
+import AdmobBannerCard from "../components/AdmobBannerCard";
 
 const { width } = Dimensions.get("window");
 
@@ -246,43 +247,51 @@ export default function HomeScreen({ navigation }) {
                     </TouchableOpacity>
                 </View>
 
-                {QUIZ_CATEGORIES.slice(0, showAllGames ? QUIZ_CATEGORIES.length : 4).map((cat) => (
-                    <TouchableOpacity
-                        key={cat.id}
-                        style={styles.gameCard}
-                        activeOpacity={0.8}
-                        onPress={() => navigation.navigate("Quiz", { category: cat.id, title: cat.title })}
-                    >
-                        <View style={[styles.gameImagePlaceholder, { backgroundColor: cat.color }]}>
-                            <MaterialCommunityIcons name={cat.icon} size={28} color="#fff" />
-                        </View>
-                        <View style={{ flex: 1, marginLeft: 15 }}>
-                            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                                <Text style={styles.gameTitle}>{cat.title} & Win</Text>
-                                {cat.badge && (
-                                    <View style={{ backgroundColor: cat.badgeColor + "22", borderColor: cat.badgeColor, borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
-                                        <Text style={{ color: cat.badgeColor, fontSize: 9, fontWeight: "700" }}>{cat.badge}</Text>
-                                    </View>
-                                )}
+                {QUIZ_CATEGORIES.slice(0, showAllGames ? QUIZ_CATEGORIES.length : 4).map((cat, index) => (
+                    <React.Fragment key={cat.id}>
+                        <TouchableOpacity
+                            style={styles.gameCard}
+                            activeOpacity={0.8}
+                            onPress={() => navigation.navigate("Quiz", { category: cat.id, title: cat.title })}
+                        >
+                            <View style={[styles.gameImagePlaceholder, { backgroundColor: cat.color }]}>
+                                <MaterialCommunityIcons name={cat.icon} size={28} color="#fff" />
                             </View>
-                            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
-                                <MaterialCommunityIcons name="lightning-bolt" size={14} color="#facc15" />
-                                <Text style={styles.gameSub}>+1 Correct • -1 Wrong • 35s Timer</Text>
+                            <View style={{ flex: 1, marginLeft: 15 }}>
+                                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                                    <Text style={styles.gameTitle}>{cat.title} & Win</Text>
+                                    {cat.badge && (
+                                        <View style={{ backgroundColor: cat.badgeColor + "22", borderColor: cat.badgeColor, borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                                            <Text style={{ color: cat.badgeColor, fontSize: 9, fontWeight: "700" }}>{cat.badge}</Text>
+                                        </View>
+                                    )}
+                                </View>
+                                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
+                                    <MaterialCommunityIcons name="lightning-bolt" size={14} color="#facc15" />
+                                    <Text style={styles.gameSub}>
+                                        +1 Correct • <Text style={{ color: "#ef4444", fontWeight: "700" }}>-1 Wrong</Text> • 35s Timer
+                                    </Text>
+                                </View>
+                                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
+                                    {[1, 2, 3, 4].map((s) => (
+                                        <MaterialCommunityIcons key={s} name="star" size={14} color="#facc15" />
+                                    ))}
+                                    {cat.stars === 5 ? (
+                                        <MaterialCommunityIcons name="star" size={14} color="#facc15" />
+                                    ) : (
+                                        <MaterialCommunityIcons name="star-half-full" size={14} color="#facc15" />
+                                    )}
+                                    <Text style={{ color: "#94a3b8", fontSize: 11, marginLeft: 6 }}>OpenTDB Live Trivia</Text>
+                                </View>
                             </View>
-                            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
-                                {[1, 2, 3, 4].map((s) => (
-                                    <MaterialCommunityIcons key={s} name="star" size={14} color="#facc15" />
-                                ))}
-                                {cat.stars === 5 ? (
-                                    <MaterialCommunityIcons name="star" size={14} color="#facc15" />
-                                ) : (
-                                    <MaterialCommunityIcons name="star-half-full" size={14} color="#facc15" />
-                                )}
-                                <Text style={{ color: "#94a3b8", fontSize: 11, marginLeft: 6 }}>OpenTDB Live Trivia</Text>
-                            </View>
-                        </View>
-                        <MaterialCommunityIcons name="chevron-right" size={22} color="#64748b" style={{ marginLeft: 6 }} />
-                    </TouchableOpacity>
+                            <MaterialCommunityIcons name="chevron-right" size={22} color="#64748b" style={{ marginLeft: 6 }} />
+                        </TouchableOpacity>
+
+                        {/* Banner Ad Card inside Play Games & Win */}
+                        {index === 1 && (
+                            <AdmobBannerCard asCard={true} />
+                        )}
+                    </React.Fragment>
                 ))}
 
                 {/* Load More */}
@@ -306,8 +315,13 @@ export default function HomeScreen({ navigation }) {
                     </Text>
                 </View>
 
-                <View style={{ height: 90 }} />
+                <View style={{ height: 20 }} />
             </ScrollView>
+
+            {/* Bottom Sticky Banner Ad */}
+            <View style={{ alignItems: "center", backgroundColor: "#0a0f1f", paddingBottom: 68 }}>
+                <AdmobBannerCard asCard={false} />
+            </View>
         </SafeAreaView>
     );
 }

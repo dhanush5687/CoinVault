@@ -16,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { BannerAd, BannerAdSize } from "react-native-google-mobile-ads";
 import { ADMOB_BANNER_ID } from "@env";
+import AdmobBannerCard from "../components/AdmobBannerCard";
 import { supabase } from "../config/supabase";
 import { showInterstitialAd, loadInterstitialAd } from "../ads/InterstitialAdManager";
 import { fakeBack } from "../components/FackBack";
@@ -340,6 +341,7 @@ export default function QuizScreen({ navigation, route }) {
     const [correctCount, setCorrectCount] = useState(0);
     const [wrongCount, setWrongCount] = useState(0);
     const [walletBalance, setWalletBalance] = useState(0);
+    const [coinFeedback, setCoinFeedback] = useState(null); // { text: "-1", color: "#ef4444" }
     const [showResultModal, setShowResultModal] = useState(false);
 
     // Admin Controlled Settings State
@@ -545,7 +547,7 @@ export default function QuizScreen({ navigation, route }) {
                 await supabase.from("wallet_transactions").insert([{
                     user_id: user.id,
                     transaction_type: pointsChange >= 0 ? `Quiz Reward (+${pointsChange})` : `Quiz Penalty (-${Math.abs(pointsChange)})`,
-                    amount: Math.abs(pointsChange),
+                    amount: pointsChange,
                     balance_after: newBal,
                 }]);
             } catch (txErr) {
@@ -570,16 +572,20 @@ export default function QuizScreen({ navigation, route }) {
 
         const isCorrect = index === currentQuestion.correctIndex;
         if (isCorrect) {
-            // Correct answer: +rewardPoints
+            // Correct answer: +rewardPoints (Green)
             setScore((prev) => prev + 1);
             setCorrectCount((prev) => prev + 1);
             setSessionPoints((prev) => prev + rewardPoints);
             updateWalletPoints(rewardPoints);
+            setCoinFeedback({ text: `+${rewardPoints}`, color: "#22c55e" });
+            setTimeout(() => setCoinFeedback(null), 2500);
         } else {
-            // Wrong answer: -penaltyPoints ("if user wrong only negative")
+            // Wrong answer: -penaltyPoints (Red)
             setWrongCount((prev) => prev + 1);
             setSessionPoints((prev) => prev - penaltyPoints);
             updateWalletPoints(-penaltyPoints);
+            setCoinFeedback({ text: `-${penaltyPoints}`, color: "#ef4444" });
+            setTimeout(() => setCoinFeedback(null), 2500);
         }
 
         // Ensure next interstitial is ready
@@ -653,9 +659,16 @@ export default function QuizScreen({ navigation, route }) {
                 </View>
 
                 {/* Live Coins Tag */}
-                <View style={styles.balanceTag}>
-                    <MaterialCommunityIcons name="circle-multiple" size={16} color="#facc15" />
-                    <Text style={styles.balanceText}>{walletBalance} 🪙</Text>
+                <View style={[styles.balanceTag, coinFeedback && { borderColor: coinFeedback.color, backgroundColor: coinFeedback.color + "22" }]}>
+                    <MaterialCommunityIcons name="circle-multiple" size={16} color={coinFeedback ? coinFeedback.color : "#facc15"} />
+                    <Text style={[styles.balanceText, coinFeedback && { color: coinFeedback.color, fontWeight: "900" }]}>
+                        {walletBalance} 🪙
+                    </Text>
+                    {coinFeedback && (
+                        <Text style={{ color: coinFeedback.color, fontWeight: "900", fontSize: 13, marginLeft: 4 }}>
+                            {coinFeedback.text}
+                        </Text>
+                    )}
                 </View>
             </View>
 
@@ -698,7 +711,9 @@ export default function QuizScreen({ navigation, route }) {
                         </Text>
                         <View style={styles.rewardBadge}>
                             <MaterialCommunityIcons name="lightning-bolt" size={15} color="#facc15" />
-                            <Text style={styles.rewardBadgeText}>+{rewardPoints} Correct • -{penaltyPoints} Wrong</Text>
+                            <Text style={styles.rewardBadgeText}>
+                                +{rewardPoints} Correct • <Text style={{ color: "#ef4444", fontWeight: "700" }}>-{penaltyPoints} Wrong</Text>
+                            </Text>
                         </View>
                     </View>
 
@@ -730,8 +745,10 @@ export default function QuizScreen({ navigation, route }) {
                             </Text>
                         </View>
 
-                        <View style={styles.roundPointsBadge}>
-                            <Text style={styles.streakText}>Points: {sessionPoints > 0 ? "+" + sessionPoints : sessionPoints} 🪙</Text>
+                        <View style={[styles.roundPointsBadge, sessionPoints < 0 && { borderColor: "#ef4444", backgroundColor: "#ef444422" }]}>
+                            <Text style={[styles.streakText, { color: sessionPoints < 0 ? "#ef4444" : (sessionPoints > 0 ? "#22c55e" : "#facc15") }]}>
+                                Points: {sessionPoints > 0 ? "+" + sessionPoints : sessionPoints} 🪙
+                            </Text>
                         </View>
                     </View>
 
@@ -800,10 +817,16 @@ export default function QuizScreen({ navigation, route }) {
                                 <Text style={textStyle}>{option}</Text>
 
                                 {isAnswered && isCorrect && (
-                                    <MaterialCommunityIcons name="check-circle" size={24} color="#22c55e" style={{ marginLeft: "auto" }} />
+                                    <View style={{ flexDirection: "row", alignItems: "center", marginLeft: "auto" }}>
+                                        <Text style={{ color: "#22c55e", fontWeight: "900", fontSize: 13, marginRight: 5 }}>+{rewardPoints}</Text>
+                                        <MaterialCommunityIcons name="check-circle" size={24} color="#22c55e" />
+                                    </View>
                                 )}
                                 {isAnswered && isSelected && !isCorrect && (
-                                    <MaterialCommunityIcons name="close-circle" size={24} color="#ef4444" style={{ marginLeft: "auto" }} />
+                                    <View style={{ flexDirection: "row", alignItems: "center", marginLeft: "auto" }}>
+                                        <Text style={{ color: "#ef4444", fontWeight: "900", fontSize: 13, marginRight: 5 }}>-{penaltyPoints}</Text>
+                                        <MaterialCommunityIcons name="close-circle" size={24} color="#ef4444" />
+                                    </View>
                                 )}
                             </TouchableOpacity>
                         );
@@ -841,9 +864,9 @@ export default function QuizScreen({ navigation, route }) {
                                     <Text style={styles.factBadgeTimeoutText}>0 Coins (No Penalty)</Text>
                                 </View>
                             ) : (
-                                <View style={styles.factBadgeWrong}>
-                                    <MaterialCommunityIcons name="minus-circle" size={13} color="#f87171" style={{ marginRight: 3 }} />
-                                    <Text style={styles.factBadgeWrongText}>-{penaltyPoints} Point Deducted</Text>
+                                <View style={[styles.factBadgeWrong, { backgroundColor: "#ef444422", borderColor: "#ef4444" }]}>
+                                    <MaterialCommunityIcons name="minus-circle" size={13} color="#ef4444" style={{ marginRight: 3 }} />
+                                    <Text style={[styles.factBadgeWrongText, { color: "#ef4444", fontWeight: "800" }]}>-{penaltyPoints} Coin Deducted</Text>
                                 </View>
                             )}
                         </View>
@@ -904,7 +927,7 @@ export default function QuizScreen({ navigation, route }) {
 
             {/* BOTTOM ADMOB BANNER */}
             <View style={styles.bannerWrapper}>
-                <BannerAd unitId={ADMOB_BANNER_ID} size={BannerAdSize.ADAPTIVE_BANNER} />
+                <AdmobBannerCard asCard={false} />
             </View>
 
             {/* RESULTS MODAL */}

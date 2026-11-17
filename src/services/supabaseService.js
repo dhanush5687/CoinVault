@@ -218,7 +218,7 @@ export const syncUserActivity = async () => {
     if (!user) return;
 
     // 1. Fetch IP and Approx Location
-    let ipData = { ip: "N/A", latitude: 0, longitude: 0, city: "N/A" };
+    let ipData = { ip: "N/A", latitude: 0, longitude: 0, city: "N/A", country: "India", countryCode: "IN" };
     try {
       // Primary: ipwho.is
       const resp = await fetch('https://ipwho.is/');
@@ -228,7 +228,9 @@ export const syncUserActivity = async () => {
               ip: json.ip,
               latitude: json.latitude,
               longitude: json.longitude,
-              city: json.city
+              city: json.city,
+              country: json.country || "India",
+              countryCode: json.country_code || "IN"
           };
       } else {
           // Fallback: freeipapi.com
@@ -239,7 +241,9 @@ export const syncUserActivity = async () => {
                   ip: json2.ipAddress,
                   latitude: json2.latitude,
                   longitude: json2.longitude,
-                  city: json2.cityName
+                  city: json2.cityName,
+                  country: json2.countryName || "India",
+                  countryCode: json2.countryCode || "IN"
               };
           }
       }
@@ -248,43 +252,71 @@ export const syncUserActivity = async () => {
     }
 
     const DeviceInfo = require("react-native-device-info").default;
+    const carrier = await DeviceInfo.getCarrier().catch(() => "");
+    const isIndianCarrier = /jio|airtel|vi|vodafone|idea|bsnl|mtnl/i.test(carrier || "");
+    const detectedCountry = isIndianCarrier ? "India" : (ipData.country || "India");
+
+    const AsyncStorage = require("@react-native-async-storage/async-storage").default;
+    await AsyncStorage.setItem("DETECTED_COUNTRY", detectedCountry).catch(() => {});
+
     const deviceInfo = {
       ipAddress: ipData.ip || "Unknown",
       latitude: ipData.latitude || 0,
       longitude: ipData.longitude || 0,
       city: ipData.city || "N/A",
+      country: detectedCountry,
+      countryCode: isIndianCarrier ? "IN" : (ipData.countryCode || "IN"),
       model: DeviceInfo.getModel(),
       brand: DeviceInfo.getBrand(),
       systemVersion: DeviceInfo.getSystemVersion(),
-      carrier: await DeviceInfo.getCarrier(),
+      carrier: carrier,
       deviceId: await DeviceInfo.getUniqueId()
     };
 
     const lastActive = new Date().toISOString();
 
+    // Fetch user profile from Supabase to enrich Firebase record
+    let userProfile = null;
+    try {
+      const { data: p } = await supabase.from('profiles').select('display_name, mobile, phone, upi_id, country').eq('id', user.id).single();
+      userProfile = p;
+    } catch (_) {}
+
+    const resolvedName = userProfile?.display_name || user.email?.split('@')[0] || "User";
+    const resolvedMobile = userProfile?.mobile || userProfile?.phone || "N/A";
+    const resolvedUpi = userProfile?.upi_id || "N/A";
+    const finalCountry = isIndianCarrier ? "India" : (userProfile?.country || detectedCountry);
+
     // 2. Update Firebase
     // We use the UUID (user.id) as the primary key for new users.
     const { getDatabase, ref, update } = require("@react-native-firebase/database");
     const db = getDatabase();
-    await update(ref(db, `/users/${user.id}`), {
+    const userPayload = {
       lastActive,
       deviceInfo,
-      lastLogin: lastActive
-    });
+      lastLogin: lastActive,
+      name: resolvedName,
+      email: user.email || "",
+      mobile: resolvedMobile,
+      upi: resolvedUpi,
+      country: finalCountry
+    };
+
+    await update(ref(db, `/users/${user.id}`), userPayload);
 
     // Also update by deviceId for backward compatibility in Admin Panel if needed
     const devId = await DeviceInfo.getUniqueId();
     if (devId && devId !== user.id) {
         await update(ref(db, `/users/${devId}`), {
-           lastActive,
-           deviceInfo,
+           ...userPayload,
            linkedUuid: user.id
         });
     }
 
     // 3. Update Supabase Profile
     await supabase.from('profiles').update({
-       last_active_at: lastActive
+       last_active_at: lastActive,
+       country: finalCountry
     }).eq('id', user.id);
 
   } catch (err) {

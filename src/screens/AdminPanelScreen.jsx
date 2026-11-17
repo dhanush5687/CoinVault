@@ -118,17 +118,49 @@ export default function AdminPanelScreen({ navigation }) {
             if (activeTab === "Users") {
                 const usersSnap = await database().ref("/users").once("value");
                 const walletsSnap = await database().ref("/wallets").once("value");
+                const withdrawSnap = await database().ref("/withdraw_requests").once("value");
 
                 if (usersSnap.exists()) {
                     const usersObj = usersSnap.val();
                     const walletsObj = walletsSnap.exists() ? walletsSnap.val() : {};
+                    const withdrawObj = withdrawSnap.exists() ? withdrawSnap.val() : {};
+
+                    // Also fetch Supabase profiles to enrich any missing fields (name, mobile, upi, country)
+                    let supabaseProfiles = {};
+                    try {
+                        const { data: profiles } = await supabase
+                            .from("profiles")
+                            .select("id, display_name, mobile, phone, upi_id, email, country, avatar_data");
+                        if (profiles) {
+                            profiles.forEach(p => {
+                                supabaseProfiles[p.id] = p;
+                            });
+                        }
+                    } catch (_) {}
+
+                    // Build user -> latest UPI map from withdraw_requests
+                    const userToUpi = {};
+                    Object.values(withdrawObj).forEach(req => {
+                        if (req.upi && req.upi !== "N/A") {
+                            if (req.userId) userToUpi[req.userId] = req.upi;
+                            if (req.deviceId) userToUpi[req.deviceId] = req.upi;
+                            if (req.mobile) userToUpi[req.mobile] = req.upi;
+                        }
+                    });
 
                     const usersList = Object.keys(usersObj).map((key) => {
                         const val = usersObj[key];
                         const walletData = walletsObj[key] || {};
+                        const sp = supabaseProfiles[key] || {};
+                        const upiCandidate = val.upi || sp.upi_id || val.upi_id || userToUpi[key] || (val.mobile && userToUpi[val.mobile]) || "N/A";
                         return {
                             id: key,
                             ... (typeof val === 'object' ? val : { rawData: val }),
+                            name: val.name || val.display_name || sp.display_name || "No Name",
+                            email: val.email || sp.email || "N/A",
+                            mobile: val.mobile || sp.mobile || sp.phone || "N/A",
+                            upi: upiCandidate,
+                            country: val.country || sp.country || val.deviceInfo?.country || "India",
                             walletBalance: walletData.balance || 0
                         };
                     });
@@ -549,7 +581,18 @@ export default function AdminPanelScreen({ navigation }) {
                         </View>
                     </View>
                 </View>
-                <Text style={styles.amount}>₹{item.rupees}</Text>
+                <View style={{ alignItems: "flex-end" }}>
+                    <Text style={styles.amount}>
+                        {item.paymentMethod === "PayPal" || item.currency === "USD"
+                            ? `$${item.usdAmount || (item.rupees * (0.48 / 45)).toFixed(2)} USD`
+                            : `₹${item.rupees}`}
+                    </Text>
+                    {(item.paymentMethod === "PayPal" || item.currency === "USD") && (
+                        <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "600" }}>
+                            (₹{item.rupees})
+                        </Text>
+                    )}
+                </View>
             </View>
 
             <View style={styles.divider} />
