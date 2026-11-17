@@ -2,12 +2,39 @@
 import { AppState } from "react-native";
 import "react-native-url-polyfill/auto";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import EncryptedStorage from "react-native-encrypted-storage";
 import { createClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@env";
 
+// 🛡️ Hardware-Backed Encrypted Session Storage Adapter (F-14)
+const SecureAuthStorage = {
+  getItem: async (key) => {
+    try {
+      const val = await EncryptedStorage.getItem(key);
+      if (val !== null && val !== undefined) return val;
+      return await AsyncStorage.getItem(key);
+    } catch {
+      return await AsyncStorage.getItem(key);
+    }
+  },
+  setItem: async (key, value) => {
+    try {
+      await EncryptedStorage.setItem(key, value);
+    } catch {
+      await AsyncStorage.setItem(key, value);
+    }
+  },
+  removeItem: async (key) => {
+    try {
+      await EncryptedStorage.removeItem(key);
+    } catch {}
+    await AsyncStorage.removeItem(key).catch(() => {});
+  },
+};
+
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
-    storage: AsyncStorage,
+    storage: SecureAuthStorage,
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,

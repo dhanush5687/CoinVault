@@ -488,7 +488,7 @@ export default function ProfileScreen({ navigation }) {
                             style={[styles.modalOption, { backgroundColor: "#1e293b", borderWidth: 1, borderColor: "#334155" }]}
                             onPress={() => {
                                 setContactVisible(false);
-                                Linking.openURL("http://t.me/Coinvault_sbot");
+                                Linking.openURL("https://t.me/Coinvault_sbot");
                             }}
                         >
                             <MaterialCommunityIcons name="telegram" size={20} color="#fff" />
