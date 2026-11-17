@@ -45,6 +45,30 @@ export default function AdminPanelScreen({ navigation }) {
     const [quizTesting, setQuizTesting] = useState(false);
     const [quizSaving, setQuizSaving] = useState(false);
 
+    // 🛡️ Enforce Server-Side Admin Authorization (F-12)
+    useEffect(() => {
+        let isMounted = true;
+        const verifyAdmin = async () => {
+            const { isCurrentUserAdmin } = require("../services/supabaseService");
+            const isAdmin = await isCurrentUserAdmin().catch(() => false);
+            if (!isAdmin && isMounted) {
+                Alert.alert(
+                    "Unauthorized",
+                    "You do not have administrative privileges to access this area.",
+                    [{
+                        text: "OK",
+                        onPress: () => navigation.reset({
+                            index: 0,
+                            routes: [{ name: "MainTabs" }]
+                        })
+                    }]
+                );
+            }
+        };
+        verifyAdmin();
+        return () => { isMounted = false; };
+    }, []);
+
     useEffect(() => {
         fetchData();
     }, [activeTab]);

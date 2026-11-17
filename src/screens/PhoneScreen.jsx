@@ -37,12 +37,6 @@ export default function PhoneScreen({ navigation }) {
 
         setLoading(true);
         try {
-            if (phone === "8885551616" || phone === "+918885551616") {
-                alert("Admin Mode: Redirecting to OTP Screen. Use static code: 885687");
-                navigation.navigate("OTP", { phone });
-                return;
-            }
-
             const { sendOtpToPhone } = require("../services/supabaseService");
             const result = await sendOtpToPhone(phone);
 

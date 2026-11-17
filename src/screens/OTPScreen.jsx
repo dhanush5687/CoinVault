@@ -69,11 +69,6 @@ export default function OTPScreen({ navigation, route }) {
     setTimer(60);
 
     try {
-      if (phone === "8885551616" || phone === "+918885551616") {
-        alert("Admin users only  please  login with your own email id");
-        return;
-      }
-
       const { sendOtpToEmail, sendOtpToPhone } = require("../services/supabaseService");
       let result;
       if (email) {
@@ -103,17 +98,7 @@ export default function OTPScreen({ navigation, route }) {
 
     setLoading(true);
     try {
-      // 🔥 Admin Bypass
-      if ((phone === "8885551616" || phone === "+918885551616") && finalOtp === "885687") {
-        console.log("🚀 Admin Access Granted");
-        navigation.reset({
-          index: 0,
-          routes: [{ name: "AdminPanel" }],
-        });
-        return;
-      }
-
-      const { verifyOtpForEmail, verifyOtpForPhone } = require("../services/supabaseService");
+      const { verifyOtpForEmail, verifyOtpForPhone, isCurrentUserAdmin } = require("../services/supabaseService");
       let result;
       if (email) {
         result = await verifyOtpForEmail(email, finalOtp);
@@ -123,10 +108,18 @@ export default function OTPScreen({ navigation, route }) {
 
       if (result && result.success) {
         console.log("✅ Verified!");
-        navigation.reset({
-          index: 0,
-          routes: [{ name: "MainTabs" }],
-        });
+        const isAdmin = await isCurrentUserAdmin().catch(() => false);
+        if (isAdmin) {
+          navigation.reset({
+            index: 0,
+            routes: [{ name: "AdminPanel" }],
+          });
+        } else {
+          navigation.reset({
+            index: 0,
+            routes: [{ name: "MainTabs" }],
+          });
+        }
       } else {
         alert("Invalid OTP: " + (result?.error || "Unknown error"));
       }
