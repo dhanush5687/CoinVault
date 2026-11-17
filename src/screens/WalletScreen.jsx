@@ -37,6 +37,7 @@ export default function WalletScreen() {
   const [name, setName] = useState("");
   const [mobile, setMobile] = useState("");
   const [upi, setUpi] = useState("");
+  const [payoutType, setPayoutType] = useState("UPI");
   const [loading, setLoading] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
 
@@ -59,22 +60,45 @@ export default function WalletScreen() {
       if (!user) return;
 
       // 1. Fetch Wallet Balance from Firebase (Primary Source of Truth)
-      const database = require("@react-native-firebase/database").default;
-      const walletSnap = await database().ref(`/wallets/${user.id}`).once("value");
+      const { getDatabase, ref, get, query, orderByChild, equalTo } = require("@react-native-firebase/database");
+      const db = getDatabase();
+      const walletSnap = await get(ref(db, `/wallets/${user.id}`));
 
       if (walletSnap.exists()) {
         const walletData = walletSnap.val();
         setCoins(parseFloat(walletData.balance) || 0);
-      } else {
-        // Fallback to Supabase if Firebase wallet doesn't exist yet
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("wallet_balance")
-          .eq("id", user.id)
-          .single();
+      }
 
-        if (profile) {
+      // Fetch Profile for prefill and balance fallback
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("wallet_balance, display_name, mobile, phone, upi_id")
+        .eq("id", user.id)
+        .single();
+
+      if (profile) {
+        if (!walletSnap.exists()) {
           setCoins(parseFloat(profile.wallet_balance) || 0);
+        }
+        if (profile.display_name) setName((prev) => prev || profile.display_name);
+        if (profile.mobile || profile.phone) setMobile((prev) => prev || profile.mobile || profile.phone);
+        if (profile.upi_id) {
+          setUpi((prev) => prev || profile.upi_id);
+          const savedUpi = profile.upi_id.toLowerCase();
+          if (savedUpi.includes("paypal") || (!savedUpi.includes("ok") && !savedUpi.includes("upi") && !savedUpi.includes("paytm") && savedUpi.includes("@"))) {
+            setPayoutType("PayPal");
+          }
+        }
+      } else {
+        const localProf = await AsyncStorage.getItem("USER_PROFILE");
+        if (localProf) {
+          const lp = JSON.parse(localProf);
+          if (lp.name) setName((prev) => prev || lp.name);
+          if (lp.mobile) setMobile((prev) => prev || lp.mobile);
+          if (lp.upi) {
+            setUpi((prev) => prev || lp.upi);
+            if (lp.upi.toLowerCase().includes("paypal")) setPayoutType("PayPal");
+          }
         }
       }
 
@@ -87,26 +111,53 @@ export default function WalletScreen() {
 
       if (transactions) {
         // 3. Fetch current status from Firebase to ensure real-time accuracy for user
-        const fbSnap = await database().ref("/withdraw_requests")
-          .orderByChild("userId")
-          .equalTo(user.id)
-          .once("value");
+        const withdrawQuery = query(ref(db, "/withdraw_requests"), orderByChild("userId"), equalTo(user.id));
+        const fbSnap = await get(withdrawQuery);
         const fbData = fbSnap.val() || {};
 
-        // Map to expected UI format
-        const formattedHistory = transactions.map(t => {
+        // Collect all refund transactions by originalId to prevent duplicate rows
+        const refundByOriginalId = {};
+        transactions.forEach((t) => {
+          if (t.transaction_type === "Refund" && t.metadata?.originalId) {
+            refundByOriginalId[t.metadata.originalId] = t;
+          }
+        });
+
+        // Set to track seen withdrawal IDs and prevent duplicate entries
+        const seenWithdrawalIds = new Set();
+        const formattedHistory = [];
+
+        transactions.forEach((t) => {
+          // If this is a separate Refund ledger row whose original withdrawal exists, SKIP IT
+          // so the user only sees ONE entry in Withdrawal History for that request
+          if (t.transaction_type === "Refund") {
+            const origId = t.metadata?.originalId;
+            const originalExists = origId && transactions.some((other) => other.id === origId);
+            if (originalExists) {
+              return; // Skip duplicate refund entry!
+            }
+          }
+
+          // Prevent duplicate rows with identical IDs
+          if (seenWithdrawalIds.has(t.id)) {
+            return;
+          }
+          seenWithdrawalIds.add(t.id);
+
           let status = "Completed";
           let rejectReason = null;
           let utrId = t.metadata?.utrId;
           let paidAt = t.metadata?.paidAt;
+          let paymentMethod = t.metadata?.paymentMethod || (t.metadata?.upi?.toLowerCase().includes("paypal") ? "PayPal" : "UPI");
 
-          // Merge Firebase Status if available (it has the latest "Paid" update from Admin)
+          // Merge Firebase Status if available (it has the latest "Paid" or "Refunded" update from Admin)
           const fbMatch = fbData[t.id];
           if (fbMatch) {
             status = fbMatch.status || "Pending";
             rejectReason = fbMatch.rejectReason || null;
             utrId = fbMatch.utrId || utrId;
             paidAt = fbMatch.paidAt || paidAt;
+            if (fbMatch.paymentMethod) paymentMethod = fbMatch.paymentMethod;
           } else if (t.transaction_type === "Withdrawal" && t.metadata && t.metadata.status) {
             status = t.metadata.status;
             rejectReason = t.metadata.rejectReason;
@@ -115,7 +166,16 @@ export default function WalletScreen() {
             rejectReason = t.metadata?.reason;
           }
 
-          return {
+          // Check if there is a linked refund transaction that marks this withdrawal as refunded
+          const linkedRefund = refundByOriginalId[t.id];
+          if (linkedRefund) {
+            status = "Refunded";
+            if (!rejectReason) {
+              rejectReason = linkedRefund.metadata?.reason || "Details rejected by admin";
+            }
+          }
+
+          formattedHistory.push({
             id: t.id,
             type: t.transaction_type,
             coins: parseFloat(t.amount),
@@ -123,9 +183,11 @@ export default function WalletScreen() {
             rejectReason: rejectReason,
             utrId: utrId,
             paidAt: paidAt,
+            paymentMethod: paymentMethod,
             date: new Date(t.created_at).toLocaleString(),
-          };
+          });
         });
+
         setHistory(formattedHistory);
         // Persist for offline view
         await AsyncStorage.setItem("COIN_HISTORY", JSON.stringify(formattedHistory));
@@ -144,7 +206,8 @@ export default function WalletScreen() {
 
   // 🔥 Sync withdraw status + auto delete if admin removes
   const syncWithdrawStatus = async () => {
-    const database = require("@react-native-firebase/database").default;
+    const { getDatabase, ref: fbRef, onValue } = require("@react-native-firebase/database");
+    const db = getDatabase();
     const local = await AsyncStorage.getItem("COIN_HISTORY");
     if (!local) return;
 
@@ -153,18 +216,22 @@ export default function WalletScreen() {
     list.forEach((item) => {
       // Listen for updates on any withdrawal category
       if (item.id && (item.type === "Withdrawal" || item.type === "Withdraw")) {
-        const ref = database().ref(`/withdraw_requests/${item.id}`);
-        ref.off();
+        const itemRef = fbRef(db, `/withdraw_requests/${item.id}`);
 
-        ref.on("value", async (snap) => {
+        onValue(itemRef, async (snap) => {
           if (snap.exists()) {
             const data = snap.val();
             // Updatelist with new status if it changed
             let updated = false;
             const newList = list.map((h) => {
-              if (h.id === item.id && h.status !== data.status) {
+              if (h.id === item.id && (h.status !== data.status || h.rejectReason !== data.rejectReason)) {
                 updated = true;
-                return { ...h, status: data.status, type: "Withdrawal" };
+                return {
+                  ...h,
+                  status: data.status,
+                  rejectReason: data.rejectReason || h.rejectReason,
+                  type: "Withdrawal"
+                };
               }
               return h;
             });
@@ -218,7 +285,7 @@ export default function WalletScreen() {
     }
 
     if (!name || !mobile || !upi) {
-      alert("Enter Name, Mobile & UPI ID");
+      alert(`Please enter Name, Mobile & ${payoutType === "PayPal" ? "PayPal ID" : "UPI ID"}`);
       return;
     }
 
@@ -238,6 +305,9 @@ export default function WalletScreen() {
 
       if (pError) throw pError;
 
+      const isPayPal = payoutType === "PayPal" || (upi.includes("@") && !upi.toLowerCase().includes("ok") && !upi.toLowerCase().includes("upi") && !upi.toLowerCase().includes("paytm"));
+      const paymentMethod = isPayPal ? "PayPal" : "UPI";
+
       // 2. Create Transaction Record (Supabase)
       const { data: trans, error: tError } = await supabase
         .from("wallet_transactions")
@@ -246,8 +316,8 @@ export default function WalletScreen() {
           transaction_type: "Withdrawal",
           amount: -amount,
           balance_after: newBalance,
-          description: `Withdrawal via UPI: ${upi}`,
-          metadata: { name, mobile, upi, status: "Pending" }
+          description: `Withdrawal via ${paymentMethod}: ${upi}`,
+          metadata: { name, mobile, upi, paymentMethod, status: "Pending" }
         }])
         .select()
         .single();
@@ -256,13 +326,15 @@ export default function WalletScreen() {
 
       // 3. Sync to Firebase for Admin Panel Visibility
       try {
-        const database = require("@react-native-firebase/database").default;
-        await database().ref(`/withdraw_requests/${trans.id}`).set({
+        const { getDatabase, ref: fbRef, set, update } = require("@react-native-firebase/database");
+        const db = getDatabase();
+        await set(fbRef(db, `/withdraw_requests/${trans.id}`), {
           id: trans.id,
           userId: user.id,
           name: name,
           mobile: mobile,
           upi: upi,
+          paymentMethod: paymentMethod,
           coins: amount,
           rupees: (amount / 100).toFixed(2), // Assuming 100 coins = 1 Rupee
           status: "Pending",
@@ -270,7 +342,7 @@ export default function WalletScreen() {
           timestamp: Date.now()
         });
         // Also sync user balance to Firebase wallet for legacy support
-        await database().ref(`/wallets/${user.id}`).update({
+        await update(fbRef(db, `/wallets/${user.id}`), {
           balance: newBalance,
           lastUpdated: Date.now()
         });
@@ -305,26 +377,27 @@ export default function WalletScreen() {
     }
   };
 
-  const renderItem = ({ item }) => (
-    <TouchableOpacity 
-      style={styles.historyItem} 
-      onPress={() => {
-        if (item.type === "Withdrawal") {
+  const renderItem = ({ item }) => {
+    const isRefunded = item.status === "Refunded";
+    return (
+      <TouchableOpacity 
+        style={styles.historyItem} 
+        onPress={() => {
           setSelectedTransaction(item);
-        }
-      }}
-    >
-      <View style={{ flex: 1 }}>
-        <Text style={styles.historyType}>{item.type}</Text>
-        <Text style={styles.historyDate}>{item.date}</Text>
-        
-        {/* Prominent status for any Withdrawal category */}
-        {item.type?.toLowerCase().includes("withdraw") && (
+        }}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.historyType}>
+            {isRefunded ? "Withdrawal (Refunded)" : item.type}
+          </Text>
+          <Text style={styles.historyDate}>{item.date}</Text>
+          
+          {/* Prominent status for any Withdrawal or Refunded category */}
           <View style={{ marginTop: 4 }}>
             <Text
               style={{
                 color: item.status === "Paid" ? "#22c55e" : 
-                       (item.status === "Refunded" || item.status === "Rejected" ? "#ef4444" : "#facc15"),
+                       (isRefunded ? "#38bdf8" : (item.status === "Rejected" ? "#ef4444" : "#facc15")),
                 fontSize: 12,
                 fontWeight: "900",
                 textTransform: "uppercase",
@@ -337,35 +410,32 @@ export default function WalletScreen() {
                 ⚠️ {item.rejectReason}
               </Text>
             )}
-          </View>
-        )}
-
-        {/* Status for Refund category */}
-        {item.type === "Refund" && (
-          <View style={{ marginTop: 4 }}>
-            <Text style={{ color: "#38bdf8", fontSize: 12, fontWeight: "700" }}>
-              • REFUNDED
-            </Text>
-            {item.rejectReason && (
-              <Text style={{ color: "#9ca3af", fontSize: 11 }}>Reason: {item.rejectReason}</Text>
+            {isRefunded && (
+              <Text style={{ color: "#38bdf8", fontSize: 11, fontWeight: "600", marginTop: 2 }}>
+                ↩ Coins restored to wallet
+              </Text>
             )}
           </View>
-        )}
-      </View>
-      <View style={{ alignItems: "flex-end", justifyContent: "center" }}>
-        <Text
-          style={[
-            styles.historyCoins,
-            { color: item.coins > 0 ? "#22c55e" : "#ef4444" },
-          ]}
-        >
-          {item.coins > 0 ? "+" : ""}
-          {item.coins}
-        </Text>
-        <MaterialCommunityIcons name="database-arrow-up" size={16} color={item.coins > 0 ? "#22c55e" : "#ef4444"} style={{ marginLeft: 4 }} />
-      </View>
-    </TouchableOpacity>
-  );
+        </View>
+        <View style={{ alignItems: "flex-end", justifyContent: "center" }}>
+          <Text
+            style={[
+              styles.historyCoins,
+              { color: isRefunded ? "#38bdf8" : (item.coins > 0 ? "#22c55e" : "#ef4444") },
+            ]}
+          >
+            {isRefunded ? `+${Math.abs(item.coins)}` : (item.coins > 0 ? "+" : "") + item.coins}
+          </Text>
+          <MaterialCommunityIcons 
+            name={isRefunded ? "cash-refund" : "database-arrow-up"} 
+            size={16} 
+            color={isRefunded ? "#38bdf8" : (item.coins > 0 ? "#22c55e" : "#ef4444")} 
+            style={{ marginLeft: 4 }} 
+          />
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <SafeAreaView edges={['top']} style={styles.container}>
@@ -440,13 +510,60 @@ export default function WalletScreen() {
                 onChangeText={setMobile}
                 style={styles.input}
               />
+              {/* Payout Method Selector */}
+              <View style={styles.payoutSelector}>
+                <Text style={styles.payoutLabel}>Payment Method:</Text>
+                <View style={styles.payoutToggleRow}>
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    style={[styles.payoutToggleBtn, payoutType === "UPI" && styles.payoutToggleActive]}
+                    onPress={() => setPayoutType("UPI")}
+                  >
+                    <MaterialCommunityIcons
+                      name="bank-transfer"
+                      size={18}
+                      color={payoutType === "UPI" ? "#000" : "#94a3b8"}
+                      style={{ marginRight: 6 }}
+                    />
+                    <Text style={[styles.payoutToggleText, payoutType === "UPI" && styles.payoutToggleActiveText]}>
+                      UPI ID
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    style={[styles.payoutToggleBtn, payoutType === "PayPal" && styles.payoutToggleActive]}
+                    onPress={() => setPayoutType("PayPal")}
+                  >
+                    <MaterialCommunityIcons
+                      name="credit-card-outline"
+                      size={18}
+                      color={payoutType === "PayPal" ? "#000" : "#94a3b8"}
+                      style={{ marginRight: 6 }}
+                    />
+                    <Text style={[styles.payoutToggleText, payoutType === "PayPal" && styles.payoutToggleActiveText]}>
+                      PayPal ID
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
               <TextInput
-                placeholder="UPI ID"
+                placeholder={payoutType === "UPI" ? "Enter UPI ID (e.g. user@okhdfc)" : "Enter PayPal Email (e.g. user@paypal.com)"}
                 placeholderTextColor="#777"
                 value={upi}
                 onChangeText={setUpi}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType={payoutType === "PayPal" ? "email-address" : "default"}
                 style={styles.input}
               />
+
+              <Text style={styles.inputHelpText}>
+                {payoutType === "UPI"
+                  ? "💡 Examples: 9876543210@upi, name@okhdfc, name@paytm"
+                  : "💡 Examples: user@paypal.com (Your PayPal registered email)"}
+              </Text>
 
               <TouchableOpacity 
                 style={[styles.withdrawBtn, loading && { opacity: 0.7 }]} 
@@ -494,13 +611,21 @@ export default function WalletScreen() {
                 {selectedTransaction.status === "Paid" && (
                   <>
                     <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Payment Method:</Text>
+                      <Text style={[styles.detailValue, { color: selectedTransaction.paymentMethod === "PayPal" ? "#38bdf8" : "#22c55e", fontWeight: "bold" }]}>
+                        {selectedTransaction.paymentMethod === "PayPal" ? "🌐 PayPal" : "🇮🇳 UPI"}
+                      </Text>
+                    </View>
+                    <View style={styles.detailRow}>
                       <Text style={styles.detailLabel}>Paid At:</Text>
                       <Text style={styles.detailValue}>
                         {selectedTransaction.paidAt ? new Date(selectedTransaction.paidAt).toLocaleString() : "N/A"}
                       </Text>
                     </View>
                     <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>UTR ID:</Text>
+                      <Text style={styles.detailLabel}>
+                        {selectedTransaction.paymentMethod === "PayPal" ? "PayPal Trans ID:" : "UTR ID:"}
+                      </Text>
                       <Text style={[styles.detailValue, { color: "#38bdf8", fontWeight: "bold" }]}>
                         {selectedTransaction.utrId || "Processing"}
                       </Text>
@@ -617,6 +742,53 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 10,
     marginTop: 8,
+  },
+
+  payoutSelector: {
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  payoutLabel: {
+    color: "#9ca3af",
+    fontSize: 12,
+    fontWeight: "600",
+    marginBottom: 6,
+  },
+  payoutToggleRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  payoutToggleBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1e293b",
+    paddingVertical: 9,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#334155",
+  },
+  payoutToggleActive: {
+    backgroundColor: "#22c55e",
+    borderColor: "#22c55e",
+  },
+  payoutToggleText: {
+    color: "#94a3b8",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  payoutToggleActiveText: {
+    color: "#000",
+    fontWeight: "800",
+  },
+  inputHelpText: {
+    color: "#94a3b8",
+    fontSize: 11,
+    marginTop: 4,
+    marginBottom: 6,
+    lineHeight: 15,
   },
 
   withdrawBtn: {

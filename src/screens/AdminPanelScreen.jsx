@@ -289,7 +289,8 @@ export default function AdminPanelScreen({ navigation }) {
                 });
                 Alert.alert("Success", "Message updated");
             } else if (modalType === "utr") {
-                // Mark as Paid with UTR
+                const isPayPal = currentEditItem?.paymentMethod === "PayPal" || (currentEditItem?.upi && currentEditItem?.upi.toLowerCase().includes("paypal"));
+                // Mark as Paid with UTR / PayPal Transaction ID
                 await database().ref(`/withdraw_requests/${currentEditItem.id}`).update({ 
                     status: "Paid", 
                     utrId: modalValue,
@@ -311,8 +312,12 @@ export default function AdminPanelScreen({ navigation }) {
                         })
                         .eq("id", currentEditItem.id);
                 }
-                Alert.alert("Success", "Request marked as Paid with UTR");
+                Alert.alert("Success", `Request marked as Paid with ${isPayPal ? "PayPal Transaction ID" : "UTR ID"}`);
             } else if (modalType === "reject") {
+                if (currentEditItem.status === "Refunded") {
+                    Alert.alert("Notice", "This request is already marked as Refunded.");
+                    return;
+                }
                 // Mark as Refunded with Reason (Wrong Details)
                 const statusUpdate = "Refunded";
                 const reasonDetail = modalValue;
@@ -347,14 +352,6 @@ export default function AdminPanelScreen({ navigation }) {
                 const isUUIDUser = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUserId);
                 if (isUUIDUser) {
                     await supabase.from("profiles").update({ wallet_balance: newBalance }).eq("id", targetUserId);
-                    await supabase.from("wallet_transactions").insert([{
-                        user_id: targetUserId,
-                        transaction_type: "Refund",
-                        amount: refundAmount,
-                        balance_after: newBalance,
-                        description: `Refund: ${reasonDetail} (Req #${currentEditItem.id.slice(0, 6)})`,
-                        metadata: { originalId: currentEditItem.id, reason: reasonDetail }
-                    }]);
 
                     await supabase.from("wallet_transactions")
                         .update({
@@ -380,7 +377,9 @@ export default function AdminPanelScreen({ navigation }) {
     };
 
     const handleMarkAsPaid = (item) => {
-        handleOpenModal("utr", "Enter UTR ID", "", item);
+        const isPayPal = item.paymentMethod === "PayPal" || (item.upi && item.upi.toLowerCase().includes("paypal")) || (item.upi && item.upi.includes("@") && !item.upi.toLowerCase().includes("ok") && !item.upi.toLowerCase().includes("upi") && !item.upi.toLowerCase().includes("paytm"));
+        const title = isPayPal ? "Enter PayPal Transaction ID" : "Enter UPI UTR ID";
+        handleOpenModal("utr", title, "", item);
     };
 
     const handleMarkWrongDetails = (item) => {
@@ -562,14 +561,40 @@ export default function AdminPanelScreen({ navigation }) {
                 </TouchableOpacity>
             </View>
 
-            <View style={styles.infoLine}>
-                <Text style={styles.detail}>UPI: {item.upi}</Text>
-                <TouchableOpacity onPress={() => copyToClipboard(item.upi, "UPI ID")}>
-                    <Text style={styles.copyLabel}>Copy</Text>
-                </TouchableOpacity>
-            </View>
+            {(() => {
+                const isPayPal = item.paymentMethod === "PayPal" || (item.upi && item.upi.toLowerCase().includes("paypal")) || (item.upi && item.upi.includes("@") && !item.upi.toLowerCase().includes("ok") && !item.upi.toLowerCase().includes("upi") && !item.upi.toLowerCase().includes("paytm"));
+                return (
+                    <View style={styles.infoLine}>
+                        <View style={{ flexDirection: "row", alignItems: "center", flex: 1, marginRight: 8 }}>
+                            <View style={[styles.methodBadge, { backgroundColor: isPayPal ? "#0284c7" : "#16a34a" }]}>
+                                <Text style={styles.methodBadgeText}>{isPayPal ? "🌐 PayPal" : "🇮🇳 UPI"}</Text>
+                            </View>
+                            <Text style={[styles.detail, { marginLeft: 8, flexShrink: 1 }]}>
+                                {isPayPal ? "PayPal ID: " : "UPI ID: "}
+                                <Text style={{ color: "#fff", fontWeight: "bold" }}>{item.upi}</Text>
+                            </Text>
+                        </View>
+                        <TouchableOpacity onPress={() => copyToClipboard(item.upi, isPayPal ? "PayPal ID" : "UPI ID")}>
+                            <Text style={styles.copyLabel}>Copy</Text>
+                        </TouchableOpacity>
+                    </View>
+                );
+            })()}
 
             <Text style={styles.detail}>Requested: {item.coins} Coins</Text>
+
+            {item.utrId ? (
+                <View style={styles.infoLine}>
+                    <Text style={[styles.detail, { color: "#38bdf8", fontWeight: "600" }]}>
+                        {(item.paymentMethod === "PayPal" || item.upi?.toLowerCase().includes("paypal")) ? "PayPal Trans ID: " : "UTR ID: "}
+                        {item.utrId}
+                    </Text>
+                    <TouchableOpacity onPress={() => copyToClipboard(item.utrId, "Confirmation ID")}>
+                        <Text style={styles.copyLabel}>Copy</Text>
+                    </TouchableOpacity>
+                </View>
+            ) : null}
+
             <Text style={styles.date}>{item.date}</Text>
 
             <View style={styles.actionRow}>
@@ -639,9 +664,9 @@ export default function AdminPanelScreen({ navigation }) {
             </View>
 
             <View style={styles.infoLine}>
-                <Text style={styles.detail}>💰 UPI: {item.upi || "N/A"}</Text>
+                <Text style={styles.detail}>💰 UPI / PayPal: {item.upi || "N/A"}</Text>
                 {item.upi ? (
-                    <TouchableOpacity onPress={() => copyToClipboard(item.upi, "UPI ID")}>
+                    <TouchableOpacity onPress={() => copyToClipboard(item.upi, "UPI / PayPal ID")}>
                         <Text style={styles.copyLabel}>Copy</Text>
                     </TouchableOpacity>
                 ) : null}
@@ -945,12 +970,18 @@ export default function AdminPanelScreen({ navigation }) {
                         <Text style={styles.modalTitle}>{modalTitle}</Text>
                         <TextInput
                             style={styles.modalInput}
-                            placeholder="Enter value..."
+                            placeholder={
+                                modalType === "utr"
+                                    ? ((currentEditItem?.paymentMethod === "PayPal" || currentEditItem?.upi?.toLowerCase().includes("paypal"))
+                                        ? "Enter PayPal Transaction ID (e.g. 9AB12345CD)"
+                                        : "Enter 12-digit UPI UTR number (e.g. 405812345678)")
+                                    : "Enter value..."
+                            }
                             placeholderTextColor="#64748b"
                             value={modalValue}
                             onChangeText={setModalValue}
                             keyboardType={modalType === "coins" ? "numeric" : "default"}
-                            multiline={modalType !== "coins"}
+                            multiline={modalType !== "coins" && modalType !== "utr"}
                             autoFocus={true}
                         />
                         <View style={styles.modalButtons}>
@@ -1104,6 +1135,17 @@ const styles = StyleSheet.create({
     name: { color: "#fff", fontSize: 16, fontWeight: "bold" },
     amount: { color: "#4ade80", fontSize: 18, fontWeight: "bold" },
     detail: { color: "#94a3b8", fontSize: 14 },
+    methodBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 6,
+        alignSelf: "center",
+    },
+    methodBadgeText: {
+        color: "#fff",
+        fontSize: 11,
+        fontWeight: "bold",
+    },
     infoLine: {
         flexDirection: "row",
         justifyContent: "space-between",

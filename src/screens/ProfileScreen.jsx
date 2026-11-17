@@ -15,7 +15,7 @@ import {
     Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import database from "@react-native-firebase/database";
+import { getDatabase, ref, onValue } from "@react-native-firebase/database";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DeviceInfo from "react-native-device-info";
 import { launchImageLibrary } from "react-native-image-picker";
@@ -222,20 +222,20 @@ export default function ProfileScreen({ navigation }) {
         );
     };
 
-    /* ================= FIREBASE MARQUEE (FIXED) ================= */
+    /* ================= FIREBASE MARQUEE (MODULAR) ================= */
     const listenMarquee = () => {
+        const db = getDatabase();
         // speed
-        database()
-            .ref("/marqueeConfig/speed")
-            .on("value", (s) => {
-                if (s.exists() && typeof s.val() === "number") {
-                    setSpeed(s.val());
-                }
-            });
+        const speedRef = ref(db, "/marqueeConfig/speed");
+        const unsubSpeed = onValue(speedRef, (s) => {
+            if (s.exists() && typeof s.val() === "number") {
+                setSpeed(s.val());
+            }
+        });
 
         // messages
-        const ref = database().ref(`/marqueeMessages/${language}`);
-        ref.on("value", (snap) => {
+        const msgRef = ref(db, `/marqueeMessages/${language}`);
+        const unsubMsg = onValue(msgRef, (snap) => {
             if (!snap.exists()) {
                 setMessages([]);
                 return;
@@ -259,7 +259,10 @@ export default function ProfileScreen({ navigation }) {
             setIndex(0);
         });
 
-        return () => ref.off();
+        return () => {
+            if (unsubSpeed) unsubSpeed();
+            if (unsubMsg) unsubMsg();
+        };
     };
 
     /* ================= MARQUEE ANIMATION ================= */
@@ -338,7 +341,18 @@ export default function ProfileScreen({ navigation }) {
             />
             <TextInput style={styles.input} placeholder="Full Name" placeholderTextColor="#777" value={name} onChangeText={setName} />
             <TextInput style={styles.input} placeholder="Mobile" placeholderTextColor="#777" keyboardType="number-pad" value={mobile} onChangeText={setMobile} />
-            <TextInput style={styles.input} placeholder="UPI ID" placeholderTextColor="#777" value={upi} onChangeText={setUpi} />
+            <TextInput
+                style={styles.input}
+                placeholder="UPI ID / PayPal ID"
+                placeholderTextColor="#777"
+                value={upi}
+                onChangeText={setUpi}
+                autoCapitalize="none"
+                autoCorrect={false}
+            />
+            <Text style={styles.inputHelpText}>
+                💡 UPI (e.g. name@okaxis) or PayPal Email (e.g. name@paypal.com)
+            </Text>
 
             {/* GENDER */}
             <View style={styles.row}>
@@ -660,5 +674,12 @@ const styles = StyleSheet.create({
         color: '#64748b',
         fontSize: 12,
         marginTop: 20,
+    },
+    inputHelpText: {
+        color: "#94a3b8",
+        fontSize: 11,
+        marginTop: 4,
+        marginBottom: 8,
+        paddingHorizontal: 4,
     },
 });
