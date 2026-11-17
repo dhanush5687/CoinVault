@@ -274,25 +274,40 @@ export default function AdminPanelScreen({ navigation }) {
                         .filter((item) => item.status === activeTab);
 
                     const getRequestTime = (item) => {
-                        if (typeof item.timestamp === "number" && item.timestamp > 0) return item.timestamp;
+                        let latest = 0;
                         if (item.paidAt) {
                             const t = new Date(item.paidAt).getTime();
-                            if (!isNaN(t)) return t;
+                            if (!isNaN(t) && t > latest) latest = t;
+                        }
+                        if (item.refundedAt) {
+                            const t = new Date(item.refundedAt).getTime();
+                            if (!isNaN(t) && t > latest) latest = t;
+                        }
+                        if (item.lastUpdated && typeof item.lastUpdated === "number" && item.lastUpdated > latest) {
+                            latest = item.lastUpdated;
+                        }
+                        if (item.updatedAt) {
+                            const t = new Date(item.updatedAt).getTime();
+                            if (!isNaN(t) && t > latest) latest = t;
+                        }
+                        if (typeof item.timestamp === "number" && item.timestamp > latest) {
+                            latest = item.timestamp;
                         }
                         if (item.created_at) {
                             const t = new Date(item.created_at).getTime();
-                            if (!isNaN(t)) return t;
+                            if (!isNaN(t) && t > latest) latest = t;
                         }
-                        if (item.date) {
+                        if (item.date && latest === 0) {
                             const parts = String(item.date).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
                             if (parts) {
                                 const parsed = new Date(`${parts[3]}-${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}`).getTime();
-                                if (!isNaN(parsed)) return parsed;
+                                if (!isNaN(parsed)) latest = parsed;
+                            } else {
+                                const t = new Date(item.date).getTime();
+                                if (!isNaN(t)) latest = t;
                             }
-                            const t = new Date(item.date).getTime();
-                            if (!isNaN(t)) return t;
                         }
-                        return 0;
+                        return latest;
                     };
 
                     withdrawList.sort((a, b) => getRequestTime(b) - getRequestTime(a));
@@ -368,11 +383,15 @@ export default function AdminPanelScreen({ navigation }) {
                 Alert.alert("Success", "Message updated");
             } else if (modalType === "utr") {
                 const isPayPal = currentEditItem?.paymentMethod === "PayPal" || (currentEditItem?.upi && currentEditItem?.upi.toLowerCase().includes("paypal"));
-                // Mark as Paid with UTR / PayPal Transaction ID
+                const nowIso = new Date().toISOString();
+                const nowTimestamp = Date.now();
+                // Mark as Paid with UTR / PayPal Transaction ID and update timestamp for instant top-of-list display
                 await database().ref(`/withdraw_requests/${currentEditItem.id}`).update({ 
                     status: "Paid", 
                     utrId: modalValue,
-                    paidAt: new Date().toISOString() 
+                    paidAt: nowIso,
+                    lastUpdated: nowTimestamp,
+                    updatedAt: nowIso
                 });
 
                 const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(currentEditItem.id);
@@ -385,7 +404,9 @@ export default function AdminPanelScreen({ navigation }) {
                                 userCurrentBalance: undefined, 
                                 status: "Paid",
                                 utrId: modalValue,
-                                paidAt: new Date().toISOString()
+                                paidAt: nowIso,
+                                lastUpdated: nowTimestamp,
+                                updatedAt: nowIso
                             } 
                         })
                         .eq("id", currentEditItem.id);
@@ -407,10 +428,16 @@ export default function AdminPanelScreen({ navigation }) {
                     return;
                 }
 
-                // 1. Update Request Status in Firebase
+                const nowIso = new Date().toISOString();
+                const nowTimestamp = Date.now();
+
+                // 1. Update Request Status in Firebase with update timestamp
                 await database().ref(`/withdraw_requests/${currentEditItem.id}`).update({
                     status: statusUpdate,
-                    rejectReason: reasonDetail
+                    rejectReason: reasonDetail,
+                    refundedAt: nowIso,
+                    lastUpdated: nowTimestamp,
+                    updatedAt: nowIso
                 });
 
                 // 2. Refund Coins in Firebase Wallet

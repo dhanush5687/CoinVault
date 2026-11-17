@@ -202,6 +202,8 @@ export default function WalletScreen() {
         let rejectReason = null;
         let utrId = t.metadata?.utrId;
         let paidAt = t.metadata?.paidAt;
+        let refundedAt = t.metadata?.refundedAt;
+        let updatedAt = t.metadata?.updatedAt || t.metadata?.lastUpdated;
         let paymentMethod = t.metadata?.paymentMethod || (t.metadata?.upi?.toLowerCase().includes("paypal") ? "PayPal" : "UPI");
 
         // Merge Firebase Status if available (it has the latest "Paid" or "Refunded" update from Admin)
@@ -211,6 +213,8 @@ export default function WalletScreen() {
           rejectReason = fbMatch.rejectReason || null;
           utrId = fbMatch.utrId || utrId;
           paidAt = fbMatch.paidAt || paidAt;
+          refundedAt = fbMatch.refundedAt || refundedAt;
+          updatedAt = fbMatch.updatedAt || fbMatch.lastUpdated || updatedAt;
           if (fbMatch.paymentMethod) paymentMethod = fbMatch.paymentMethod;
         } else if (t.transaction_type === "Withdrawal" && t.metadata && t.metadata.status) {
           status = t.metadata.status;
@@ -227,9 +231,27 @@ export default function WalletScreen() {
           if (!rejectReason) {
             rejectReason = linkedRefund.metadata?.reason || "Details rejected by admin";
           }
+          if (linkedRefund.created_at) {
+            refundedAt = linkedRefund.created_at;
+          }
         }
 
         const tTimestamp = new Date(t.created_at).getTime();
+
+        // 🌟 Effective Activity Timestamp: prioritize admin approval/update so updated items jump to the VERY TOP
+        let effectiveTime = !isNaN(tTimestamp) ? tTimestamp : 0;
+        if (paidAt) {
+          const p = new Date(paidAt).getTime();
+          if (!isNaN(p) && p > effectiveTime) effectiveTime = p;
+        }
+        if (refundedAt) {
+          const r = new Date(refundedAt).getTime();
+          if (!isNaN(r) && r > effectiveTime) effectiveTime = r;
+        }
+        if (updatedAt) {
+          const u = typeof updatedAt === "number" ? updatedAt : new Date(updatedAt).getTime();
+          if (!isNaN(u) && u > effectiveTime) effectiveTime = u;
+        }
 
         formattedHistory.push({
           id: t.id,
@@ -239,9 +261,10 @@ export default function WalletScreen() {
           rejectReason: rejectReason,
           utrId: utrId,
           paidAt: paidAt,
+          refundedAt: refundedAt,
           paymentMethod: paymentMethod,
           date: new Date(t.created_at).toLocaleString(),
-          timestamp: !isNaN(tTimestamp) ? tTimestamp : 0,
+          timestamp: effectiveTime,
         });
       });
 
@@ -250,8 +273,22 @@ export default function WalletScreen() {
         if (!seenWithdrawalIds.has(key)) {
           seenWithdrawalIds.add(key);
           const req = fbData[key];
-          let reqTime = req.timestamp;
-          if (!reqTime && req.paidAt) reqTime = new Date(req.paidAt).getTime();
+          let reqTime = req.timestamp || 0;
+          if (req.paidAt) {
+            const p = new Date(req.paidAt).getTime();
+            if (!isNaN(p) && p > reqTime) reqTime = p;
+          }
+          if (req.refundedAt) {
+            const r = new Date(req.refundedAt).getTime();
+            if (!isNaN(r) && r > reqTime) reqTime = r;
+          }
+          if (req.lastUpdated && typeof req.lastUpdated === "number" && req.lastUpdated > reqTime) {
+            reqTime = req.lastUpdated;
+          }
+          if (req.updatedAt) {
+            const u = new Date(req.updatedAt).getTime();
+            if (!isNaN(u) && u > reqTime) reqTime = u;
+          }
           if (!reqTime && req.date) {
             const parts = String(req.date).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
             if (parts) reqTime = new Date(`${parts[3]}-${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}`).getTime();
@@ -266,6 +303,7 @@ export default function WalletScreen() {
             rejectReason: req.rejectReason || null,
             utrId: req.utrId || null,
             paidAt: req.paidAt || null,
+            refundedAt: req.refundedAt || null,
             paymentMethod: req.paymentMethod || (req.upi?.toLowerCase().includes("paypal") ? "PayPal" : "UPI"),
             date: req.date || (req.timestamp ? new Date(req.timestamp).toLocaleString() : new Date().toLocaleString()),
             timestamp: typeof reqTime === "number" && !isNaN(reqTime) ? reqTime : 0,
@@ -273,16 +311,8 @@ export default function WalletScreen() {
         }
       });
 
-      // Sort with current date and time on top (newest first)
-      formattedHistory.sort((a, b) => {
-        const timeA = (typeof a.timestamp === "number" && a.timestamp > 0)
-          ? a.timestamp
-          : (a.paidAt ? new Date(a.paidAt).getTime() : 0);
-        const timeB = (typeof b.timestamp === "number" && b.timestamp > 0)
-          ? b.timestamp
-          : (b.paidAt ? new Date(b.paidAt).getTime() : 0);
-        return timeB - timeA;
-      });
+      // Sort with latest activity on top (when admin updates/approves, it immediately jumps to top)
+      formattedHistory.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
       setHistory(formattedHistory);
       // Persist for offline view
@@ -525,12 +555,18 @@ export default function WalletScreen() {
                   </Text>
                 ) : null}
                 {item.paidAt ? (
-                  <Text style={{ color: "#9ca3af", fontSize: 10, fontWeight: "500", marginTop: 1 }}>
-                    Paid on: {new Date(item.paidAt).toLocaleString()}
+                  <Text style={{ color: "#22c55e", fontSize: 10, fontWeight: "600", marginTop: 1 }}>
+                    ✓ Approved on: {new Date(item.paidAt).toLocaleString()}
                   </Text>
                 ) : null}
               </View>
             )}
+
+            {isRefunded && item.refundedAt ? (
+              <Text style={{ color: "#38bdf8", fontSize: 10, fontWeight: "500", marginTop: 1 }}>
+                Refunded on: {new Date(item.refundedAt).toLocaleString()}
+              </Text>
+            ) : null}
 
             {item.rejectReason && (
               <Text style={{ color: "#ef4444", fontSize: 11, fontWeight: "700", marginTop: 2 }}>
