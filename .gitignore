@@ -32,8 +32,15 @@ local.properties
 *.hprof
 .cxx/
 *.keystore
+*.jks
 !debug.keystore
 .kotlin/
+
+# Environment files & Secrets
+.env
+.env*.local
+.env.production
+.env.staging
 
 # node.js
 #
