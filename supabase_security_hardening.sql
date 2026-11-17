@@ -153,3 +153,4 @@ $$;
 -- Grant execution to authenticated users
 GRANT EXECUTE ON FUNCTION reward_user_coins(INT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION process_withdrawal(INT, TEXT, JSONB) TO authenticated;
+
