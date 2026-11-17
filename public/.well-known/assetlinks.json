@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.facevaultapp",
+      "sha256_cert_fingerprints": [
+        "95:3F:A3:FD:96:BE:7F:CE:46:EC:21:DD:96:B0:9B:D4:79:6B:55:D6:F0:20:01:F0:CF:A2:AA:5E:DF:FA:B7:D6"
+      ]
+    }
+  }
+]
+

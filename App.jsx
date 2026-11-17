@@ -63,12 +63,14 @@
 
 
 import React, { useEffect } from "react";
-import { NavigationContainer } from "@react-navigation/native";
+import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { Linking } from "react-native";
+import { Linking, StatusBar } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 // import { withStallion } from 'react-native-stallion';
 import { HotUpdater } from '@hot-updater/react-native';
+import InAppNotificationBanner from "./src/components/InAppNotificationBanner";
 
 // 🔥 Ads
 import mobileAds from "react-native-google-mobile-ads";
@@ -95,6 +97,7 @@ import QuizScreen from "./src/screens/QuizScreen";
 // import StallionUpdateModal from "./src/components/StallionUpdateModal";
 
 const Stack = createNativeStackNavigator();
+const navigationRef = createNavigationContainerRef();
 
 function App() {
 
@@ -151,10 +154,9 @@ function App() {
     }, []);
 
     return (
-        <>
-        <>
-            {/* <StallionUpdateModal /> */}
-            <NavigationContainer>
+        <SafeAreaProvider>
+            <StatusBar barStyle="light-content" backgroundColor="#0a0f1f" translucent={false} />
+            <NavigationContainer ref={navigationRef}>
                 <Stack.Navigator screenOptions={{ headerShown: false }}>
                     <Stack.Screen name="Splash" component={SplashScreen} />
                     <Stack.Screen name="Login" component={LoginScreen} />
@@ -175,10 +177,12 @@ function App() {
                     <Stack.Screen name="MainTabs" component={TabNavigator} />
                 </Stack.Navigator>
             </NavigationContainer>
-        </>
-        </>
+            <InAppNotificationBanner navigationRef={navigationRef} />
+        </SafeAreaProvider>
     );
 }
 
-export default App;
-// export default withStallion(App);
+export default HotUpdater.wrap({
+    baseURL: "https://uwpnfnwqluxhzlnewcgp.supabase.co/functions/v1/update-server",
+    updateStrategy: "appVersion",
+})(App);

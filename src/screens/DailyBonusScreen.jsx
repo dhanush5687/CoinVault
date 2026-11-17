@@ -11,7 +11,9 @@ import {
   Dimensions,
   Alert,
   Platform,
+  StatusBar,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Image } from "react-native";
 import { fakeBack } from "../components/FackBack";
@@ -230,19 +232,24 @@ export default function DailyBonusScreen({ navigation }) {
   /* ================= UI ================= */
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView edges={['top']} style={styles.container}>
 
-      {/* BACK BUTTON */}
-      <TouchableOpacity
-        style={styles.backBtn}
-        onPress={() => fakeBack(navigation)}
-      >
-        <MaterialCommunityIcons name="arrow-left" size={28} color="#38bdf8" />
-      </TouchableOpacity>
+      {/* TOP HEADER ROW */}
+      <View style={styles.topHeader}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => fakeBack(navigation)}
+          activeOpacity={0.7}
+        >
+          <MaterialCommunityIcons name="arrow-left" size={28} color="#38bdf8" />
+        </TouchableOpacity>
 
-      <View style={{ flexDirection: 'row', alignItems: 'center', position: 'absolute', top: 40 }}>
-        <MaterialCommunityIcons name="gift" size={30} color="#facc15" style={{ marginRight: 10 }} />
-        <Text style={{ color: "#facc15", fontSize: 22, fontWeight: "800" }}>Daily Spin Bonus</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <MaterialCommunityIcons name="gift" size={26} color="#facc15" style={{ marginRight: 8 }} />
+          <Text style={{ color: "#facc15", fontSize: 20, fontWeight: "800" }}>Daily Spin Bonus</Text>
+        </View>
+
+        <View style={{ width: 40 }} />
       </View>
 
       {/* POINTER */}
@@ -308,7 +315,7 @@ export default function DailyBonusScreen({ navigation }) {
           }}
         />
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -322,12 +329,22 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
-  backBtn: {
+  topHeader: {
     position: "absolute",
-    top: 42,
-    left: 18,
-    padding: 8,
+    top: 12,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
     zIndex: 20,
+  },
+
+  backBtn: {
+    padding: 6,
+    borderRadius: 10,
+    backgroundColor: "#1e293b",
   },
 
   backIcon: {

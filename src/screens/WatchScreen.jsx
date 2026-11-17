@@ -10,6 +10,7 @@ import {
     ActivityIndicator,
     Modal,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../config/supabase";
 import {
     BannerAd,
@@ -143,14 +144,14 @@ export default function WatchScreen({ navigation }) {
     };
 
     return (
-        <View style={styles.container}>
+        <SafeAreaView edges={['top']} style={styles.container}>
             {/* HEADER */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()}>
-                    <MaterialCommunityIcons name="arrow-left" size={32} color="#38bdf8" />
+                <TouchableOpacity onPress={() => navigation.goBack()} activeOpacity={0.7}>
+                    <MaterialCommunityIcons name="arrow-left" size={28} color="#38bdf8" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Watch & Earn</Text>
-                <View style={{ width: 32 }} />
+                <View style={{ width: 28 }} />
             </View>
 
             {/* TOP BANNER */}
@@ -220,7 +221,7 @@ export default function WatchScreen({ navigation }) {
                     </View>
                 </View>
             </Modal>
-        </View>
+        </SafeAreaView>
     );
 }
 

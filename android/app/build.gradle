@@ -1,6 +1,8 @@
 apply plugin: "com.android.application"
 apply from: "../../node_modules/react-native-vector-icons/fonts.gradle"
 
+project.ext.set("REACT_NATIVE_NODE_MODULES_DIR", file("${rootDir}/../node_modules/react-native"))
+
 // Read .env file
 def env = [:]
 def envFile = file("../../.env")
@@ -41,8 +43,9 @@ react {
     // debuggableVariants = ["liteDebug", "prodDebug"]
 
     /* Bundling */
-    //   A list containing the node command and its flags. Default is just 'node'.
-    // nodeExecutableAndArgs = ["node"]
+    // Ensure Android Studio / GUI Gradle daemons locate node across Intel & Apple Silicon Macs
+    def nodeBin = ["/usr/local/bin/node", "/opt/homebrew/bin/node"].find { file(it).exists() } ?: "node"
+    nodeExecutableAndArgs = [nodeBin]
     //
     //   The command to run when bundling. By default is 'bundle'
     // bundleCommand = "ram-bundle"

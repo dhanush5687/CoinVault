@@ -14,12 +14,14 @@ import {
     Linking,
     Modal,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import database from "@react-native-firebase/database";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DeviceInfo from "react-native-device-info";
 import { launchImageLibrary } from "react-native-image-picker";
 import { supabase } from "../config/supabase";
 import { deleteAccount, updateUserProfile, signOut, syncUserActivity } from "../services/supabaseService";
+import { subscribeToSupportChat } from "../services/chatService";
 
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { BannerAd, BannerAdSize } from "react-native-google-mobile-ads";
@@ -43,6 +45,7 @@ export default function ProfileScreen({ navigation }) {
     const [image, setImage] = useState("");
     const [email, setEmail] = useState("");
     const [contactVisible, setContactVisible] = useState(false);
+    const [hasUnreadSupport, setHasUnreadSupport] = useState(false);
 
     /* ================= MARQUEE ================= */
     const translateX = useRef(new Animated.Value(screenWidth)).current;
@@ -55,6 +58,15 @@ export default function ProfileScreen({ navigation }) {
     useEffect(() => {
         initProfile();
         listenMarquee();
+
+        // 💬 Realtime listener for Support unread indication
+        const unsubscribeChat = subscribeToSupportChat(({ hasUnread }) => {
+            setHasUnreadSupport(hasUnread);
+        });
+
+        return () => {
+            unsubscribeChat();
+        };
     }, []);
 
     // Show App Open on Focus
@@ -273,16 +285,20 @@ export default function ProfileScreen({ navigation }) {
     const logout = async () => {
         await signOut(); // Ensure Supabase signout
         await AsyncStorage.clear();
-        navigation.replace("Login");
+        navigation.reset({
+            index: 0,
+            routes: [{ name: "Login" }],
+        });
     };
 
     /* ================= UI ================= */
     return (
-        <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 150 }}>
-            {/* Top Banner */}
-            <View style={{ alignItems: "center", marginBottom: 10 }}>
-                <BannerAd unitId={ADMOB_BANNER_ID} size={BannerAdSize.ADAPTIVE_BANNER} />
-            </View>
+        <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: "#0a0f1f" }}>
+            <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 150 }}>
+                {/* Top Banner */}
+                <View style={{ alignItems: "center", marginBottom: 10 }}>
+                    <BannerAd unitId={ADMOB_BANNER_ID} size={BannerAdSize.ADAPTIVE_BANNER} />
+                </View>
 
             <Text style={styles.title}>Create / Update Profile</Text>
 
@@ -357,11 +373,19 @@ export default function ProfileScreen({ navigation }) {
                         <Text style={styles.extraBtnText}>F.A.Q</Text>
                     </View>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={openContact} style={styles.extraBtn}>
+                <TouchableOpacity
+                    onPress={openContact}
+                    style={[styles.extraBtn, hasUnreadSupport && styles.extraBtnUnread]}
+                >
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <MaterialCommunityIcons name="phone" size={18} color="#fff" style={{ marginRight: 6 }} />
                         <Text style={styles.extraBtnText}>Contact Us</Text>
                     </View>
+                    {hasUnreadSupport && (
+                        <View style={styles.contactUnreadBadge}>
+                            <Text style={styles.contactUnreadBadgeText}>1</Text>
+                        </View>
+                    )}
                 </TouchableOpacity>
             </View>
 
@@ -402,14 +426,21 @@ export default function ProfileScreen({ navigation }) {
                         </Text>
 
                         <TouchableOpacity
-                            style={[styles.modalOption, { backgroundColor: "#2563eb" }]}
+                            style={[styles.modalOption, { backgroundColor: "#2563eb", justifyContent: "space-between" }]}
                             onPress={() => {
                                 setContactVisible(false);
                                 navigation.navigate("Chat");
                             }}
                         >
-                            <MaterialCommunityIcons name="chat-processing" size={20} color="#fff" />
-                            <Text style={styles.modalOptionText}>Support Chat (Admin)</Text>
+                            <View style={{ flexDirection: "row", alignItems: "center" }}>
+                                <MaterialCommunityIcons name="chat-processing" size={20} color="#fff" style={{ marginRight: 8 }} />
+                                <Text style={styles.modalOptionText}>Support Chat (Admin)</Text>
+                            </View>
+                            {hasUnreadSupport && (
+                                <View style={styles.modalUnreadBadge}>
+                                    <Text style={styles.modalUnreadBadgeText}>New message</Text>
+                                </View>
+                            )}
                         </TouchableOpacity>
 
                         <TouchableOpacity
@@ -444,6 +475,7 @@ export default function ProfileScreen({ navigation }) {
                 </View>
             </Modal>
         </ScrollView>
+        </SafeAreaView>
     );
 }
 
@@ -560,8 +592,46 @@ const styles = StyleSheet.create({
         flex: 0.48,
         alignItems: "center",
         marginTop: 10,
+        position: "relative",
+    },
+    extraBtnUnread: {
+        borderColor: "#38bdf8",
+        borderWidth: 1.5,
     },
     extraBtnText: { color: "#fff", fontWeight: "600" },
+
+    contactUnreadBadge: {
+        position: "absolute",
+        top: -6,
+        right: -6,
+        backgroundColor: "#ef4444",
+        borderRadius: 10,
+        minWidth: 20,
+        height: 20,
+        justifyContent: "center",
+        alignItems: "center",
+        paddingHorizontal: 5,
+        borderWidth: 2,
+        borderColor: "#0a0f1f",
+    },
+    contactUnreadBadgeText: {
+        color: "#fff",
+        fontSize: 10,
+        fontWeight: "bold",
+    },
+
+    modalUnreadBadge: {
+        backgroundColor: "#ef4444",
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 10,
+        marginLeft: 10,
+    },
+    modalUnreadBadgeText: {
+        color: "#fff",
+        fontSize: 11,
+        fontWeight: "bold",
+    },
 
     logout: { alignItems: "center" },
     logoutText: { color: "#ef4444", fontSize: 16, fontWeight: "600" },

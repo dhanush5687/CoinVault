@@ -12,11 +12,16 @@ import {
     Platform,
     TextInput,
     Switch,
-    Modal
+    Modal,
+    ScrollView,
+    BackHandler,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import database from "@react-native-firebase/database";
 import Clipboard from "@react-native-clipboard/clipboard";
+import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { supabase } from "../config/supabase";
+import { getQuizConfig, saveQuizConfig, fetchQuestionsFromApi } from "../services/quizService";
 
 export default function AdminPanelScreen({ navigation }) {
     const [activeTab, setActiveTab] = useState("Pending");
@@ -32,9 +37,64 @@ export default function AdminPanelScreen({ navigation }) {
     const [modalType, setModalType] = useState(""); // "coins" or "message" or "addMessage"
     const [selectedChatUser, setSelectedChatUser] = useState(null);
 
+    // Quiz Controller States (Admin)
+    const [quizApiUrl, setQuizApiUrl] = useState("");
+    const [quizUseApi, setQuizUseApi] = useState(false);
+    const [quizRewardPoints, setQuizRewardPoints] = useState("1");
+    const [quizPenaltyPoints, setQuizPenaltyPoints] = useState("1");
+    const [quizTesting, setQuizTesting] = useState(false);
+    const [quizSaving, setQuizSaving] = useState(false);
+
     useEffect(() => {
         fetchData();
     }, [activeTab]);
+
+    // 🛡️ Hardware Back Button Handler for Admin
+    useEffect(() => {
+        const onBackPress = () => {
+            if (modalVisible) {
+                setModalVisible(false);
+                return true;
+            }
+            if (activeTab !== "Pending") {
+                setActiveTab("Pending");
+                return true;
+            }
+            Alert.alert(
+                "Exit Admin Panel",
+                "Do you want to log out or exit the app?",
+                [
+                    { text: "Cancel", style: "cancel" },
+                    {
+                        text: "Logout",
+                        style: "destructive",
+                        onPress: () => {
+                            navigation.reset({
+                                index: 0,
+                                routes: [{ name: "Login" }],
+                            });
+                        },
+                    },
+                    {
+                        text: "Exit App",
+                        onPress: () => BackHandler.exitApp(),
+                    },
+                ]
+            );
+            return true;
+        };
+
+        const subscription = BackHandler.addEventListener("hardwareBackPress", onBackPress);
+        return () => subscription.remove();
+    }, [modalVisible, activeTab]);
+
+    const handleChatWithUser = (userItem) => {
+        const targetUserName = userItem.full_name || userItem.name || userItem.mobile || userItem.email || "User";
+        navigation.navigate("AdminChat", {
+            userId: userItem.id,
+            userName: targetUserName,
+        });
+    };
 
     const copyToClipboard = (text, label) => {
         Clipboard.setString(text);
@@ -44,6 +104,17 @@ export default function AdminPanelScreen({ navigation }) {
     const fetchData = async () => {
         setLoading(true);
         try {
+            if (activeTab === "Quiz") {
+                const config = await getQuizConfig();
+                setQuizApiUrl(config.apiUrl || "");
+                setQuizUseApi(!!config.useApi);
+                setQuizRewardPoints(String(typeof config.rewardPoints === "number" ? config.rewardPoints : 1));
+                setQuizPenaltyPoints(String(typeof config.penaltyPoints === "number" ? config.penaltyPoints : 1));
+                setLoading(false);
+                setRefreshing(false);
+                return;
+            }
+
             if (activeTab === "Users") {
                 const usersSnap = await database().ref("/users").once("value");
                 const walletsSnap = await database().ref("/wallets").once("value");
@@ -408,19 +479,72 @@ export default function AdminPanelScreen({ navigation }) {
         fetchData();
     };
 
+    const handleSaveQuizConfig = async () => {
+        setQuizSaving(true);
+        const res = await saveQuizConfig({
+            apiUrl: quizApiUrl.trim(),
+            useApi: quizUseApi,
+            rewardPoints: parseInt(quizRewardPoints, 10) || 1,
+            penaltyPoints: parseInt(quizPenaltyPoints, 10) || 1,
+        });
+        setQuizSaving(false);
+        if (res.success) {
+            Alert.alert("Success 🎉", "Quiz settings and points saved to Firebase! Users will see updates immediately.");
+        } else {
+            Alert.alert("Error", "Failed to save quiz settings: " + res.error);
+        }
+    };
+
+    const handleTestQuizApi = async () => {
+        if (!quizApiUrl || !quizApiUrl.trim()) {
+            Alert.alert("Missing API URL", "Please enter an API URL before testing.");
+            return;
+        }
+        setQuizTesting(true);
+        const questions = await fetchQuestionsFromApi(quizApiUrl.trim());
+        setQuizTesting(false);
+        if (questions && questions.length > 0) {
+            Alert.alert(
+                "API Test Successful! 🎉",
+                `Successfully fetched ${questions.length} questions!\n\nSample Q: "${questions[0].question}"\nOptions: ${questions[0].options.join(", ")}`
+            );
+        } else {
+            Alert.alert(
+                "API Test Failed",
+                "Could not fetch or parse questions from this URL. Please verify the URL and network connection."
+            );
+        }
+    };
+
+    const handlePreFillOpenTDB = () => {
+        setQuizApiUrl("https://opentdb.com/api.php?amount=10&category=17&type=multiple");
+        setQuizUseApi(true);
+    };
+
+    const handleResetQuizDefaults = () => {
+        setQuizApiUrl("");
+        setQuizUseApi(false);
+        setQuizRewardPoints("1");
+        setQuizPenaltyPoints("1");
+    };
+
     const renderWithdrawItem = ({ item }) => (
         <View style={styles.card}>
             <View style={styles.cardRow}>
                 <View style={styles.userInfoMinimal}>
-                    <View>
+                    <View style={styles.avatarContainer}>
                         {item.userImage ? (
                             <Image source={{ uri: item.userImage }} style={styles.avatar} />
                         ) : (
-                            <View style={[styles.avatar, { backgroundColor: "#334155" }]} />
+                            <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                                <Text style={styles.avatarInitials}>
+                                    {((item.name || "U")[0] || "U").toUpperCase()}
+                                </Text>
+                            </View>
                         )}
                     </View>
-                    <View>
-                        <Text style={styles.name}>{item.name}</Text>
+                    <View style={styles.userTextInfo}>
+                        <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
                         <View style={styles.balanceTagSmall}>
                             <Text style={styles.remainingText}>Wallet: {item.userCurrentBalance} 🪙</Text>
                         </View>
@@ -434,14 +558,14 @@ export default function AdminPanelScreen({ navigation }) {
             <View style={styles.infoLine}>
                 <Text style={styles.detail}>Mobile: {item.mobile}</Text>
                 <TouchableOpacity onPress={() => copyToClipboard(item.mobile, "Mobile Number")}>
-                    <Text style={styles.copyLabel}>Copy Info</Text>
+                    <Text style={styles.copyLabel}>Copy</Text>
                 </TouchableOpacity>
             </View>
 
             <View style={styles.infoLine}>
                 <Text style={styles.detail}>UPI: {item.upi}</Text>
                 <TouchableOpacity onPress={() => copyToClipboard(item.upi, "UPI ID")}>
-                    <Text style={styles.copyLabel}>Copy UPI</Text>
+                    <Text style={styles.copyLabel}>Copy</Text>
                 </TouchableOpacity>
             </View>
 
@@ -468,58 +592,67 @@ export default function AdminPanelScreen({ navigation }) {
 
     const renderUserItem = ({ item }) => (
         <View style={styles.card}>
+            {/* 1. Header: Left Avatar + Name/Email (flex: 1), Right: Clean Balance Badge */}
             <View style={styles.cardRow}>
-                <View style={styles.userInfoMinimal}>
-                    <View>
-                        <View style={[styles.statusDot, { backgroundColor: getStatusColor(item.lastActive || item.lastLogin) }]} />
+                <TouchableOpacity
+                    style={styles.userInfoMinimal}
+                    activeOpacity={0.7}
+                    onPress={() => handleChatWithUser(item)}
+                >
+                    <View style={styles.avatarContainer}>
                         {item.image ? (
                             <Image source={{ uri: item.image }} style={styles.avatar} />
                         ) : (
-                            <View style={[styles.avatar, { backgroundColor: "#334155" }]} />
+                            <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                                <Text style={styles.avatarInitials}>
+                                    {((item.full_name || item.name || item.email || "U")[0] || "U").toUpperCase()}
+                                </Text>
+                            </View>
                         )}
+                        <View style={[styles.statusDot, { backgroundColor: getStatusColor(item.lastActive || item.lastLogin) }]} />
                     </View>
-                    <View>
-                        <Text style={styles.name}>{item.full_name || item.name || "No Name"}</Text>
-                        <Text style={styles.detail}>{item.email || "N/A"}</Text>
+                    <View style={styles.userTextInfo}>
+                        <Text style={styles.name} numberOfLines={1}>{item.full_name || item.name || "No Name"}</Text>
+                        <Text style={styles.detail} numberOfLines={1}>{item.email || "N/A"}</Text>
                     </View>
-                </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                    <TouchableOpacity
-                        style={styles.balanceTag}
-                        onPress={() => handleOpenModal("coins", "Edit Coins", item.walletBalance, item)}
-                    >
-                        <Text style={styles.walletBalanceText}>{item.walletBalance} 🪙</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.deleteMiniBtn, { marginTop: 8 }]}
-                        onPress={() => handleDeleteUser(item)}
-                    >
-                        <Text style={styles.deleteMiniText}>DELETE</Text>
-                    </TouchableOpacity>
-                </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={styles.balanceTag}
+                    activeOpacity={0.8}
+                    onPress={() => handleOpenModal("coins", "Edit Coins", item.walletBalance, item)}
+                >
+                    <Text style={styles.walletBalanceText}>{item.walletBalance || 0} 🪙</Text>
+                </TouchableOpacity>
             </View>
 
             <View style={styles.divider} />
 
+            {/* 2. Info lines with consistent Copy badges */}
             <View style={styles.infoLine}>
                 <Text style={styles.detail}>📱 Mobile: {item.mobile || "N/A"}</Text>
-                {item.mobile && (
+                {item.mobile ? (
                     <TouchableOpacity onPress={() => copyToClipboard(item.mobile, "Mobile Number")}>
                         <Text style={styles.copyLabel}>Copy</Text>
                     </TouchableOpacity>
-                )}
+                ) : null}
             </View>
 
             <View style={styles.infoLine}>
                 <Text style={styles.detail}>💰 UPI: {item.upi || "N/A"}</Text>
-                {item.upi && (
+                {item.upi ? (
                     <TouchableOpacity onPress={() => copyToClipboard(item.upi, "UPI ID")}>
                         <Text style={styles.copyLabel}>Copy</Text>
                     </TouchableOpacity>
-                )}
+                ) : null}
             </View>
 
-            <Text style={styles.detail}>🆔 ID: {item.id}</Text>
+            <View style={styles.infoLine}>
+                <Text style={[styles.detail, { flex: 1, marginRight: 8 }]} numberOfLines={1}>🆔 ID: {item.id}</Text>
+                <TouchableOpacity onPress={() => copyToClipboard(item.id, "User ID")}>
+                    <Text style={styles.copyLabel}>Copy</Text>
+                </TouchableOpacity>
+            </View>
 
             <View style={styles.divider} />
             <Text style={styles.sectionLabel}>Device Info:</Text>
@@ -527,16 +660,49 @@ export default function AdminPanelScreen({ navigation }) {
                 <View style={styles.deviceBox}>
                     <Text style={styles.deviceText}>IP: {item.deviceInfo.ipAddress || "N/A"}</Text>
                     <Text style={styles.deviceText}>Location: {item.deviceInfo.city || "N/A"} ({item.deviceInfo.latitude || "0"}, {item.deviceInfo.longitude || "0"})</Text>
-                    <Text style={styles.deviceText}>Model: {item.deviceInfo.model}</Text>
-                    <Text style={styles.deviceText}>Brand: {item.deviceInfo.brand}</Text>
-                    <Text style={styles.deviceText}>OS: {item.deviceInfo.systemVersion}</Text>
+                    <Text style={styles.deviceText}>Model: {item.deviceInfo.model || "N/A"}</Text>
+                    <Text style={styles.deviceText}>Brand: {item.deviceInfo.brand || "N/A"}</Text>
+                    <Text style={styles.deviceText}>OS: {item.deviceInfo.systemVersion || "N/A"}</Text>
                     <Text style={styles.deviceText}>Carrier: {item.deviceInfo.carrier || "N/A"}</Text>
                 </View>
             ) : (
-                <Text style={styles.deviceText}>No detailed info (Update Required)</Text>
+                <View style={styles.deviceBox}>
+                    <Text style={styles.deviceText}>No detailed info (Update Required)</Text>
+                </View>
             )}
 
             <Text style={styles.date}>Last Active: {item.lastActive || item.lastLogin || "N/A"}</Text>
+
+            <View style={styles.divider} />
+
+            {/* 3. Balanced Action Row: Direct Message + Edit Coins + Delete (No Overflow) */}
+            <View style={styles.userCardActionRow}>
+                <TouchableOpacity
+                    style={styles.chatUserBtn}
+                    onPress={() => handleChatWithUser(item)}
+                    activeOpacity={0.8}
+                >
+                    <MaterialCommunityIcons name="chat-processing-outline" size={17} color="#fff" style={{ marginRight: 6 }} />
+                    <Text style={styles.chatUserBtnText}>Direct Message</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={styles.editCoinsBtn}
+                    onPress={() => handleOpenModal("coins", "Edit Coins", item.walletBalance, item)}
+                    activeOpacity={0.8}
+                >
+                    <Text style={styles.editCoinsBtnText}>🪙 Edit</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={styles.deleteUserBtn}
+                    onPress={() => handleDeleteUser(item)}
+                    activeOpacity={0.8}
+                >
+                    <MaterialCommunityIcons name="trash-can-outline" size={16} color="#ef4444" style={{ marginRight: 4 }} />
+                    <Text style={styles.deleteUserBtnText}>Del</Text>
+                </TouchableOpacity>
+            </View>
         </View>
     );
 
@@ -588,27 +754,152 @@ export default function AdminPanelScreen({ navigation }) {
         </TouchableOpacity>
     );
 
+    const renderQuizSettings = () => (
+        <ScrollView style={styles.quizSettingsContainer} contentContainerStyle={{ padding: 15 }}>
+            <View style={styles.quizHeaderCard}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                    <Text style={styles.quizHeaderTitle}>Quiz & Points Controller</Text>
+                    <View style={[styles.apiStatusBadge, { backgroundColor: quizUseApi ? "#14532d" : "#1e3a8a" }]}>
+                        <Text style={[styles.apiStatusText, { color: quizUseApi ? "#4ade80" : "#60a5fa" }]}>
+                            {quizUseApi ? "● API Mode Active" : "● Default Mode Active"}
+                        </Text>
+                    </View>
+                </View>
+                <Text style={styles.quizHeaderSub}>
+                    Control whether questions load dynamically from an API or show default biology questions, and customize points for correct/wrong answers.
+                </Text>
+            </View>
+
+            {/* API SETTINGS */}
+            <View style={styles.quizSectionCard}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                    <Text style={styles.quizSectionTitle}>1. Questions API Configuration</Text>
+                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                        <Text style={{ color: "#94a3b8", fontSize: 13, marginRight: 8 }}>Enable API</Text>
+                        <Switch
+                            value={quizUseApi}
+                            onValueChange={setQuizUseApi}
+                            trackColor={{ false: "#334155", true: "#22c55e" }}
+                        />
+                    </View>
+                </View>
+
+                <Text style={styles.inputLabel}>Questions API URL (OpenTDB or Custom JSON)</Text>
+                <TextInput
+                    style={styles.quizTextInput}
+                    placeholder="e.g. https://opentdb.com/api.php?amount=10&category=17&type=multiple"
+                    placeholderTextColor="#64748b"
+                    value={quizApiUrl}
+                    onChangeText={setQuizApiUrl}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                />
+
+                <View style={styles.apiBtnRow}>
+                    <TouchableOpacity style={styles.testApiBtn} onPress={handleTestQuizApi} disabled={quizTesting}>
+                        {quizTesting ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                            <Text style={styles.btnText}>🧪 Test API Endpoint</Text>
+                        )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity style={styles.prefillBtn} onPress={handlePreFillOpenTDB}>
+                        <Text style={styles.btnText}>⚡ Load Biology API</Text>
+                    </TouchableOpacity>
+                </View>
+
+                <Text style={styles.helperText}>
+                    💡 If API is disabled or fails to connect, the app seamlessly serves default curated biology questions.
+                </Text>
+            </View>
+
+            {/* POINTS CONFIGURATION */}
+            <View style={styles.quizSectionCard}>
+                <Text style={styles.quizSectionTitle}>2. Points & Reward Controls</Text>
+                
+                <View style={styles.pointsRow}>
+                    <View style={{ flex: 1, marginRight: 10 }}>
+                        <Text style={styles.inputLabel}>Points on Correct (+)</Text>
+                        <TextInput
+                            style={styles.quizTextInput}
+                            keyboardType="number-pad"
+                            value={quizRewardPoints}
+                            onChangeText={setQuizRewardPoints}
+                            placeholder="1"
+                            placeholderTextColor="#64748b"
+                        />
+                    </View>
+
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={styles.inputLabel}>Penalty on Wrong (-)</Text>
+                        <TextInput
+                            style={styles.quizTextInput}
+                            keyboardType="number-pad"
+                            value={quizPenaltyPoints}
+                            onChangeText={setQuizPenaltyPoints}
+                            placeholder="1"
+                            placeholderTextColor="#64748b"
+                        />
+                    </View>
+                </View>
+                <Text style={styles.helperText}>
+                    💡 Each correct answer adds this amount to the user's wallet. Wrong answers deduct the penalty.
+                </Text>
+            </View>
+
+            {/* ACTIONS */}
+            <TouchableOpacity style={styles.saveQuizBtn} onPress={handleSaveQuizConfig} disabled={quizSaving}>
+                {quizSaving ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                    <Text style={styles.saveQuizBtnText}>💾 Save & Publish Quiz Controls</Text>
+                )}
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.resetQuizBtn} onPress={handleResetQuizDefaults}>
+                <Text style={styles.resetQuizBtnText}>↺ Reset to Default Settings</Text>
+            </TouchableOpacity>
+
+            <View style={{ height: 40 }} />
+        </ScrollView>
+    );
+
     return (
-        <View style={styles.container}>
+        <SafeAreaView edges={['top']} style={styles.container}>
             <View style={styles.header}>
-                <Text style={styles.headerTitle}>Admin Panel (Firebase)</Text>
-                <TouchableOpacity onPress={() => navigation.replace("Login")}>
+                <View>
+                    <Text style={styles.headerTitle}>Admin Panel</Text>
+                    <Text style={styles.headerSub}>Firebase Management Console</Text>
+                </View>
+                <TouchableOpacity
+                    style={styles.logoutBtn}
+                    onPress={() => navigation.reset({ index: 0, routes: [{ name: "Login" }] })}
+                    activeOpacity={0.7}
+                >
                     <Text style={styles.logout}>Logout</Text>
                 </TouchableOpacity>
             </View>
 
-            <View style={styles.tabBar}>
-                {["Pending", "Paid", "Users", "Messages", "Chats"].map((tab) => (
-                    <TouchableOpacity
-                        key={tab}
-                        style={[styles.tab, activeTab === tab && styles.activeTab]}
-                        onPress={() => setActiveTab(tab)}
-                    >
-                        <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
-                            {tab}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
+            <View style={styles.tabBarContainer}>
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.tabBarScroll}
+                >
+                    {["Pending", "Paid", "Users", "Messages", "Chats", "Quiz"].map((tab) => (
+                        <TouchableOpacity
+                            key={tab}
+                            style={[styles.tab, activeTab === tab && styles.activeTab]}
+                            onPress={() => setActiveTab(tab)}
+                            activeOpacity={0.7}
+                        >
+                            <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
+                                {tab}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
             </View>
 
             {activeTab === "Messages" && (
@@ -624,6 +915,8 @@ export default function AdminPanelScreen({ navigation }) {
                 <View style={styles.loader}>
                     <ActivityIndicator size="large" color="#2563eb" />
                 </View>
+            ) : activeTab === "Quiz" ? (
+                renderQuizSettings()
             ) : (
                 <FlatList
                     data={data}
@@ -671,29 +964,66 @@ export default function AdminPanelScreen({ navigation }) {
                     </View>
                 </View>
             </Modal>
-        </View>
+        </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: "#0a0f1f" },
     header: {
-        paddingTop: 50,
-        paddingBottom: 20,
-        paddingHorizontal: 20,
+        paddingTop: 14,
+        paddingBottom: 14,
+        paddingHorizontal: 16,
         backgroundColor: "#1e293b",
         flexDirection: "row",
         justifyContent: "space-between",
         alignItems: "center",
+        borderBottomWidth: 1,
+        borderBottomColor: "#334155",
     },
-    headerTitle: { color: "#fff", fontSize: 20, fontWeight: "bold" },
-    logout: { color: "#ef4444", fontWeight: "600" },
+    headerTitle: { color: "#fff", fontSize: 18, fontWeight: "bold" },
+    headerSub: { color: "#64748b", fontSize: 11, marginTop: 1 },
+    logoutBtn: {
+        backgroundColor: "rgba(239, 68, 68, 0.12)",
+        borderWidth: 1,
+        borderColor: "rgba(239, 68, 68, 0.3)",
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 8,
+    },
+    logout: { color: "#ef4444", fontWeight: "700", fontSize: 13 },
 
-    tabBar: { flexDirection: "row", backgroundColor: "#111827", padding: 5 },
-    tab: { flex: 1, paddingVertical: 12, alignItems: "center", borderRadius: 8 },
-    activeTab: { backgroundColor: "#2563eb" },
-    tabText: { color: "#94a3b8", fontWeight: "600", fontSize: 12 },
-    activeTabText: { color: "#fff" },
+    tabBarContainer: {
+        backgroundColor: "#111827",
+        borderBottomWidth: 1,
+        borderBottomColor: "#1e293b",
+        paddingVertical: 8,
+    },
+    tabBarScroll: {
+        paddingHorizontal: 12,
+        gap: 8,
+        flexDirection: "row",
+    },
+    tab: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: 20,
+        backgroundColor: "#1e293b",
+    },
+    activeTab: {
+        backgroundColor: "#2563eb",
+    },
+    tabText: {
+        color: "#94a3b8",
+        fontWeight: "600",
+        fontSize: 13,
+    },
+    activeTabText: {
+        color: "#fff",
+        fontWeight: "bold",
+    },
 
     loader: { flex: 1, justifyContent: "center", alignItems: "center" },
     empty: { color: "#94a3b8", textAlign: "center", marginTop: 50 },
@@ -709,13 +1039,64 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: "#334155",
     },
-    cardRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-    userInfoMinimal: { flexDirection: "row", alignItems: "center", gap: 12 },
-    miniAvatar: { width: 30, height: 30, borderRadius: 15 },
-    avatar: { width: 50, height: 50, borderRadius: 25 },
-    balanceTag: { backgroundColor: "#14532d", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
-    balanceTagSmall: { backgroundColor: "#1e3a8a", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12, marginTop: 4, alignSelf: 'flex-start' },
-    walletBalanceText: { color: "#4ade80", fontWeight: "bold", fontSize: 14 },
+    cardRow: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 8,
+    },
+    userInfoMinimal: {
+        flex: 1,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        marginRight: 10,
+    },
+    avatarContainer: {
+        position: "relative",
+    },
+    avatar: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+    },
+    avatarPlaceholder: {
+        backgroundColor: "#334155",
+        justifyContent: "center",
+        alignItems: "center",
+    },
+    avatarInitials: {
+        color: "#94a3b8",
+        fontSize: 18,
+        fontWeight: "bold",
+    },
+    userTextInfo: {
+        flex: 1,
+        justifyContent: "center",
+    },
+    balanceTag: {
+        backgroundColor: "#064e3b",
+        borderWidth: 1,
+        borderColor: "#10b981",
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 16,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    balanceTagSmall: {
+        backgroundColor: "#1e3a8a",
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 12,
+        marginTop: 4,
+        alignSelf: "flex-start",
+    },
+    walletBalanceText: {
+        color: "#34d399",
+        fontWeight: "bold",
+        fontSize: 14,
+    },
     divider: { height: 1, backgroundColor: "#334155", marginVertical: 12 },
     sectionLabel: { color: "#38bdf8", fontSize: 12, fontWeight: "700", marginBottom: 5, textTransform: "uppercase" },
     deviceBox: { backgroundColor: "#0f172a", padding: 10, borderRadius: 8, marginBottom: 10 },
@@ -724,28 +1105,82 @@ const styles = StyleSheet.create({
     amount: { color: "#4ade80", fontSize: 18, fontWeight: "bold" },
     detail: { color: "#94a3b8", fontSize: 14 },
     infoLine: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginTop: 4
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginTop: 4,
     },
     copyLabel: {
-        color: '#38bdf8',
-        fontSize: 12,
-        fontWeight: 'bold',
-        textTransform: 'uppercase',
-        backgroundColor: '#0f172a',
+        color: "#38bdf8",
+        fontSize: 11,
+        fontWeight: "bold",
+        textTransform: "uppercase",
+        backgroundColor: "#0f172a",
         paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: 4
+        paddingVertical: 3,
+        borderRadius: 4,
+        borderWidth: 1,
+        borderColor: "#1e3a8a",
     },
     remainingText: {
-        color: '#facc15',
+        color: "#facc15",
         fontSize: 12,
-        fontWeight: '600',
-        marginTop: 2
+        fontWeight: "600",
+        marginTop: 2,
     },
     date: { color: "#64748b", fontSize: 12, marginTop: 8 },
+    userCardActionRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        marginTop: 4,
+    },
+    chatUserBtn: {
+        flex: 2,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "#2563eb",
+        paddingVertical: 10,
+        borderRadius: 8,
+    },
+    chatUserBtnText: {
+        color: "#fff",
+        fontWeight: "bold",
+        fontSize: 13,
+    },
+    editCoinsBtn: {
+        flex: 1.2,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "#0f172a",
+        borderWidth: 1,
+        borderColor: "#f59e0b",
+        paddingVertical: 10,
+        borderRadius: 8,
+    },
+    editCoinsBtnText: {
+        color: "#f59e0b",
+        fontWeight: "bold",
+        fontSize: 13,
+    },
+    deleteUserBtn: {
+        flex: 0.9,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "#450a0a",
+        borderWidth: 1,
+        borderColor: "#ef4444",
+        paddingVertical: 10,
+        borderRadius: 8,
+    },
+    deleteUserBtnText: {
+        color: "#ef4444",
+        fontWeight: "bold",
+        fontSize: 13,
+    },
 
     actionRow: { flexDirection: "row", marginTop: 15, gap: 10, alignItems: 'center' },
     paidBtn: { flex: 1, backgroundColor: "#22c55e", padding: 10, borderRadius: 8, alignItems: "center" },
@@ -814,5 +1249,132 @@ const styles = StyleSheet.create({
         borderRadius: 6,
         backgroundColor: '#2563eb',
         marginLeft: 10
+    },
+
+    // Quiz Controller Styles
+    quizSettingsContainer: {
+        flex: 1,
+    },
+    quizHeaderCard: {
+        backgroundColor: "#1e293b",
+        padding: 16,
+        borderRadius: 12,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: "#334155",
+    },
+    quizHeaderTitle: {
+        color: "#fff",
+        fontSize: 18,
+        fontWeight: "bold",
+    },
+    quizHeaderSub: {
+        color: "#94a3b8",
+        fontSize: 13,
+        marginTop: 8,
+        lineHeight: 18,
+    },
+    apiStatusBadge: {
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 20,
+    },
+    apiStatusText: {
+        fontSize: 12,
+        fontWeight: "bold",
+    },
+    quizSectionCard: {
+        backgroundColor: "#1e293b",
+        padding: 16,
+        borderRadius: 12,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: "#334155",
+    },
+    quizSectionTitle: {
+        color: "#38bdf8",
+        fontSize: 15,
+        fontWeight: "bold",
+        marginBottom: 8,
+    },
+    inputLabel: {
+        color: "#cbd5e1",
+        fontSize: 13,
+        fontWeight: "600",
+        marginBottom: 6,
+        marginTop: 8,
+    },
+    quizTextInput: {
+        backgroundColor: "#0f172a",
+        color: "#fff",
+        borderRadius: 8,
+        padding: 12,
+        fontSize: 14,
+        borderWidth: 1,
+        borderColor: "#334155",
+    },
+    apiBtnRow: {
+        flexDirection: "row",
+        gap: 10,
+        marginTop: 12,
+    },
+    testApiBtn: {
+        flex: 1,
+        backgroundColor: "#0284c7",
+        paddingVertical: 12,
+        paddingHorizontal: 10,
+        borderRadius: 8,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    prefillBtn: {
+        flex: 1,
+        backgroundColor: "#6366f1",
+        paddingVertical: 12,
+        paddingHorizontal: 10,
+        borderRadius: 8,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    helperText: {
+        color: "#64748b",
+        fontSize: 12,
+        marginTop: 10,
+        fontStyle: "italic",
+    },
+    pointsRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+    },
+    saveQuizBtn: {
+        backgroundColor: "#22c55e",
+        paddingVertical: 15,
+        borderRadius: 10,
+        alignItems: "center",
+        justifyContent: "center",
+        marginTop: 10,
+        shadowColor: "#22c55e",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 6,
+        elevation: 4,
+    },
+    saveQuizBtnText: {
+        color: "#fff",
+        fontSize: 16,
+        fontWeight: "bold",
+    },
+    resetQuizBtn: {
+        backgroundColor: "#334155",
+        paddingVertical: 12,
+        borderRadius: 10,
+        alignItems: "center",
+        marginTop: 12,
+    },
+    resetQuizBtnText: {
+        color: "#94a3b8",
+        fontSize: 14,
+        fontWeight: "600",
     }
 });

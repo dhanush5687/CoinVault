@@ -106,7 +106,10 @@ export default function OTPScreen({ navigation, route }) {
       // 🔥 Admin Bypass
       if ((phone === "8885551616" || phone === "+918885551616") && finalOtp === "885687") {
         console.log("🚀 Admin Access Granted");
-        navigation.replace("AdminPanel");
+        navigation.reset({
+          index: 0,
+          routes: [{ name: "AdminPanel" }],
+        });
         return;
       }
 
@@ -120,7 +123,10 @@ export default function OTPScreen({ navigation, route }) {
 
       if (result && result.success) {
         console.log("✅ Verified!");
-        navigation.replace("MainTabs");
+        navigation.reset({
+          index: 0,
+          routes: [{ name: "MainTabs" }],
+        });
       } else {
         alert("Invalid OTP: " + (result?.error || "Unknown error"));
       }

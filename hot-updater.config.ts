@@ -1,6 +1,12 @@
+import 'dotenv/config';
+import { existsSync } from 'node:fs';
 import { defineConfig } from 'hot-updater';
 import { supabaseStorage, supabaseDatabase } from "@hot-updater/supabase";
 import { bare } from "@hot-updater/bare";
+
+if (existsSync(".env.hotupdater") && typeof (process as any).loadEnvFile === "function") {
+  (process as any).loadEnvFile(".env.hotupdater");
+}
 
 export default defineConfig({
   build: bare({

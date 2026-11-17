@@ -9,14 +9,17 @@ import {
     Animated,
     Modal,
     StatusBar,
-    SafeAreaView,
+    Platform,
+    ActivityIndicator,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { BannerAd, BannerAdSize } from "react-native-google-mobile-ads";
 import { ADMOB_BANNER_ID } from "@env";
 import { supabase } from "../config/supabase";
-import { showInterstitialAd } from "../ads/InterstitialAdManager";
+import { showInterstitialAd, loadInterstitialAd } from "../ads/InterstitialAdManager";
 import { fakeBack } from "../components/FackBack";
+import { getQuizConfig, fetchQuestionsFromApi, fetchOpenTdbQuestions } from "../services/quizService";
 
 const { width } = Dimensions.get("window");
 
@@ -28,7 +31,8 @@ export const QUIZ_CATEGORIES = [
         shortTitle: "Genetics",
         icon: "dna",
         color: "#3b82f6",
-        rewardPerQ: 20,
+        rewardPerQ: 1,
+        penaltyPerQ: 1,
         stars: 5,
         badge: "POPULAR",
         badgeColor: "#ef4444",
@@ -77,7 +81,8 @@ export const QUIZ_CATEGORIES = [
         shortTitle: "Anatomy",
         icon: "heart-pulse",
         color: "#ec4899",
-        rewardPerQ: 25,
+        rewardPerQ: 1,
+        penaltyPerQ: 1,
         stars: 5,
         badge: "HOT",
         badgeColor: "#f97316",
@@ -126,7 +131,8 @@ export const QUIZ_CATEGORIES = [
         shortTitle: "Cell Bio",
         icon: "microscope",
         color: "#8b5cf6",
-        rewardPerQ: 20,
+        rewardPerQ: 1,
+        penaltyPerQ: 1,
         stars: 4.5,
         badge: "FEATURED",
         badgeColor: "#8b5cf6",
@@ -175,7 +181,8 @@ export const QUIZ_CATEGORIES = [
         shortTitle: "Botany",
         icon: "leaf",
         color: "#10b981",
-        rewardPerQ: 15,
+        rewardPerQ: 1,
+        penaltyPerQ: 1,
         stars: 4.5,
         badge: "NATURE",
         badgeColor: "#10b981",
@@ -224,7 +231,8 @@ export const QUIZ_CATEGORIES = [
         shortTitle: "Zoology",
         icon: "paw",
         color: "#f59e0b",
-        rewardPerQ: 20,
+        rewardPerQ: 1,
+        penaltyPerQ: 1,
         stars: 5,
         badge: "WILD",
         badgeColor: "#f59e0b",
@@ -273,7 +281,8 @@ export const QUIZ_CATEGORIES = [
         shortTitle: "Ecology",
         icon: "earth",
         color: "#06b6d4",
-        rewardPerQ: 25,
+        rewardPerQ: 1,
+        penaltyPerQ: 1,
         stars: 5,
         badge: "ECO",
         badgeColor: "#06b6d4",
@@ -326,33 +335,150 @@ export default function QuizScreen({ navigation, route }) {
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
     const [selectedOption, setSelectedOption] = useState(null);
     const [isAnswered, setIsAnswered] = useState(false);
-    const [sessionCoins, setSessionCoins] = useState(0);
+    const [sessionPoints, setSessionPoints] = useState(0);
     const [score, setScore] = useState(0);
+    const [correctCount, setCorrectCount] = useState(0);
+    const [wrongCount, setWrongCount] = useState(0);
     const [walletBalance, setWalletBalance] = useState(0);
     const [showResultModal, setShowResultModal] = useState(false);
+
+    // Admin Controlled Settings State
+    const [rewardPoints, setRewardPoints] = useState(1);
+    const [penaltyPoints, setPenaltyPoints] = useState(1);
+    const [apiQuestions, setApiQuestions] = useState(null);
+    const [isUsingApi, setIsUsingApi] = useState(false);
+    const [isLoadingApi, setIsLoadingApi] = useState(false);
+
+    // ⏱️ 35 Seconds Timer State
+    const [timeLeft, setTimeLeft] = useState(35);
+    const timerRef = useRef(null);
+    const timerAnim = useRef(new Animated.Value(1)).current;
 
     // Animations
     const progressAnim = useRef(new Animated.Value(0)).current;
     const optionScaleAnim = useRef(new Animated.Value(1)).current;
 
-    // Current category & questions
+    // Current category & questions (uses API questions if enabled and valid, else defaults)
     const currentCategory = QUIZ_CATEGORIES.find((c) => c.id === selectedCategoryId) || QUIZ_CATEGORIES[0];
-    const questions = currentCategory.questions;
-    const currentQuestion = questions[currentQuestionIndex] || questions[0];
+    const activeQuestions = (isUsingApi && apiQuestions && apiQuestions.length > 0)
+        ? apiQuestions
+        : currentCategory.questions;
+    const currentQuestion = activeQuestions[currentQuestionIndex] || activeQuestions[0] || currentCategory.questions[0];
 
-    // Load Wallet Balance
+    // Load Wallet Balance, Preload Interstitial Ad, and Load OpenTDB Trivia Questions
     useEffect(() => {
         fetchWalletBalance();
-    }, []);
+        loadInterstitialAd();
+        loadOpenTdbAndAdminConfig();
+
+        // Realtime Firebase Listener for Admin changes
+        const database = require("@react-native-firebase/database").default;
+        const configRef = database().ref("/quizConfig");
+        configRef.on("value", (snap) => {
+            if (snap.exists()) {
+                applyAdminConfig(snap.val());
+            }
+        });
+
+        return () => {
+            configRef.off();
+            if (timerRef.current) clearInterval(timerRef.current);
+        };
+    }, [selectedCategoryId]);
+
+    const loadOpenTdbAndAdminConfig = async () => {
+        setIsLoadingApi(true);
+        try {
+            // 🌐 Fetch live questions from Open Trivia DB (https://opentdb.com/api_config.php)
+            const opentdbQ = await fetchOpenTdbQuestions(selectedCategoryId, 10);
+            if (opentdbQ && opentdbQ.length > 0) {
+                setApiQuestions(opentdbQ);
+                setIsUsingApi(true);
+            } else {
+                setIsUsingApi(false);
+                setApiQuestions(null);
+            }
+        } catch (e) {
+            console.warn("OpenTDB load error:", e);
+            setIsUsingApi(false);
+            setApiQuestions(null);
+        } finally {
+            setIsLoadingApi(false);
+        }
+
+        const config = await getQuizConfig();
+        if (config) {
+            applyAdminConfig(config);
+        }
+    };
+
+    const applyAdminConfig = async (config) => {
+        if (!config) return;
+        setRewardPoints(typeof config.rewardPoints === "number" ? config.rewardPoints : 1);
+        setPenaltyPoints(typeof config.penaltyPoints === "number" ? config.penaltyPoints : 1);
+
+        if (config.useApi && config.apiUrl && config.apiUrl.trim()) {
+            setIsLoadingApi(true);
+            const fetched = await fetchQuestionsFromApi(config.apiUrl.trim());
+            setIsLoadingApi(false);
+            if (fetched && fetched.length > 0) {
+                setApiQuestions(fetched);
+                setIsUsingApi(true);
+            }
+        }
+    };
+
+    // ⏱️ 35 Seconds Countdown Timer per Question
+    useEffect(() => {
+        if (isLoadingApi) return;
+
+        // Reset timer to 35 seconds
+        setTimeLeft(35);
+        timerAnim.setValue(1);
+
+        if (timerRef.current) clearInterval(timerRef.current);
+
+        // Animate timer progress bar from 1 to 0 over 35 seconds
+        Animated.timing(timerAnim, {
+            toValue: 0,
+            duration: 35000,
+            useNativeDriver: false,
+        }).start();
+
+        timerRef.current = setInterval(() => {
+            setTimeLeft((prev) => {
+                if (prev <= 1) {
+                    clearInterval(timerRef.current);
+                    handleTimeOut();
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+
+        return () => {
+            if (timerRef.current) clearInterval(timerRef.current);
+        };
+    }, [currentQuestionIndex, selectedCategoryId, activeQuestions, isLoadingApi]);
+
+    const handleTimeOut = () => {
+        timerAnim.stopAnimation();
+        setIsAnswered(true);
+        setSelectedOption(-1); // -1 indicates timed out without answer
+
+        // 🔥 IMPORTANT: "if user no answer no coins negative"
+        // No negative points are applied! Balance remains unchanged.
+        loadInterstitialAd();
+    };
 
     // Update Progress Bar
     useEffect(() => {
         Animated.timing(progressAnim, {
-            toValue: (currentQuestionIndex + 1) / questions.length,
+            toValue: (currentQuestionIndex + 1) / activeQuestions.length,
             duration: 300,
             useNativeDriver: false,
         }).start();
-    }, [currentQuestionIndex, questions.length]);
+    }, [currentQuestionIndex, activeQuestions.length]);
 
     const fetchWalletBalance = async () => {
         try {
@@ -377,8 +503,8 @@ export default function QuizScreen({ navigation, route }) {
         }
     };
 
-    const awardCoinsToDatabase = async (coinsWon) => {
-        if (!coinsWon || coinsWon <= 0) return;
+    const updateWalletPoints = async (pointsChange) => {
+        if (!pointsChange) return;
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
@@ -398,7 +524,8 @@ export default function QuizScreen({ navigation, route }) {
                 currentBal = parseFloat(data?.wallet_balance || 0);
             }
 
-            const newBal = currentBal + coinsWon;
+            // Floor at 0 so wallet balance never drops into negative
+            const newBal = Math.max(0, currentBal + pointsChange);
 
             // 1. Supabase update
             await supabase.from("profiles").update({ wallet_balance: newBal }).eq("id", user.id);
@@ -417,8 +544,8 @@ export default function QuizScreen({ navigation, route }) {
             try {
                 await supabase.from("wallet_transactions").insert([{
                     user_id: user.id,
-                    transaction_type: "Quiz Reward",
-                    amount: coinsWon,
+                    transaction_type: pointsChange >= 0 ? `Quiz Reward (+${pointsChange})` : `Quiz Penalty (-${Math.abs(pointsChange)})`,
+                    amount: Math.abs(pointsChange),
                     balance_after: newBal,
                 }]);
             } catch (txErr) {
@@ -427,53 +554,80 @@ export default function QuizScreen({ navigation, route }) {
 
             setWalletBalance(newBal);
         } catch (e) {
-            console.log("Error awarding quiz coins:", e);
+            console.log("Error updating quiz points:", e);
         }
     };
 
     const handleSelectOption = (index) => {
         if (isAnswered) return;
 
+        // Stop timer immediately on answer
+        if (timerRef.current) clearInterval(timerRef.current);
+        timerAnim.stopAnimation();
+
         setSelectedOption(index);
         setIsAnswered(true);
 
         const isCorrect = index === currentQuestion.correctIndex;
         if (isCorrect) {
-            const reward = currentCategory.rewardPerQ;
+            // Correct answer: +rewardPoints
             setScore((prev) => prev + 1);
-            setSessionCoins((prev) => prev + reward);
-            awardCoinsToDatabase(reward);
+            setCorrectCount((prev) => prev + 1);
+            setSessionPoints((prev) => prev + rewardPoints);
+            updateWalletPoints(rewardPoints);
+        } else {
+            // Wrong answer: -penaltyPoints ("if user wrong only negative")
+            setWrongCount((prev) => prev + 1);
+            setSessionPoints((prev) => prev - penaltyPoints);
+            updateWalletPoints(-penaltyPoints);
         }
+
+        // Ensure next interstitial is ready
+        loadInterstitialAd();
     };
 
     const handleNextQuestion = () => {
-        if (currentQuestionIndex < questions.length - 1) {
+        // 🔥 Show ad on every question!
+        showInterstitialAd();
+
+        if (currentQuestionIndex < activeQuestions.length - 1) {
             setCurrentQuestionIndex((prev) => prev + 1);
             setSelectedOption(null);
             setIsAnswered(false);
+            loadInterstitialAd();
         } else {
             // Quiz completed
-            showInterstitialAd();
             setShowResultModal(true);
         }
     };
 
     const switchCategory = (catId) => {
+        if (timerRef.current) clearInterval(timerRef.current);
         setSelectedCategoryId(catId);
         setCurrentQuestionIndex(0);
         setSelectedOption(null);
         setIsAnswered(false);
         setScore(0);
-        setSessionCoins(0);
+        setCorrectCount(0);
+        setWrongCount(0);
+        setSessionPoints(0);
+        setTimeLeft(35);
+        loadInterstitialAd();
     };
 
     const restartCurrentQuiz = () => {
+        if (timerRef.current) clearInterval(timerRef.current);
         setShowResultModal(false);
         setCurrentQuestionIndex(0);
         setSelectedOption(null);
         setIsAnswered(false);
         setScore(0);
-        setSessionCoins(0);
+        setCorrectCount(0);
+        setWrongCount(0);
+        setSessionPoints(0);
+        setTimeLeft(35);
+        loadOpenTdbAndAdminConfig();
+        loadInterstitialAd();
     };
 
     const progressWidth = progressAnim.interpolate({
@@ -482,18 +636,20 @@ export default function QuizScreen({ navigation, route }) {
     });
 
     return (
-        <SafeAreaView style={styles.container}>
-            <StatusBar barStyle="light-content" backgroundColor="#0a0f1f" />
+        <SafeAreaView edges={['top']} style={styles.container}>
+            <StatusBar barStyle="light-content" backgroundColor="#0a0f1f" translucent={false} />
 
-            {/* TOP BAR */}
+            {/* TOP BAR WITH SAFE NOTCH / STATUS BAR PADDING */}
             <View style={styles.topBar}>
-                <TouchableOpacity style={styles.backBtn} onPress={() => fakeBack(navigation)}>
-                    <MaterialCommunityIcons name="arrow-left" size={24} color="#fff" />
+                <TouchableOpacity style={styles.backBtn} onPress={() => fakeBack(navigation)} activeOpacity={0.7}>
+                    <MaterialCommunityIcons name="arrow-left" size={22} color="#fff" />
                 </TouchableOpacity>
 
                 <View style={styles.titleContainer}>
                     <Text style={styles.headerTitle}>Biology Quiz & Win</Text>
-                    <Text style={styles.headerSubtitle}>{currentCategory.title}</Text>
+                    <Text style={styles.headerSubtitle}>
+                        {isUsingApi ? "🌐 Live API Questions" : `${currentCategory.shortTitle} • ${currentCategory.title}`}
+                    </Text>
                 </View>
 
                 {/* Live Coins Tag */}
@@ -538,11 +694,11 @@ export default function QuizScreen({ navigation, route }) {
                 <View style={styles.progressCard}>
                     <View style={styles.progressRow}>
                         <Text style={styles.progressText}>
-                            Question <Text style={{ color: "#38bdf8", fontWeight: "700" }}>{currentQuestionIndex + 1}</Text> of {questions.length}
+                            Question <Text style={{ color: "#38bdf8", fontWeight: "700" }}>{currentQuestionIndex + 1}</Text> of {activeQuestions.length}
                         </Text>
                         <View style={styles.rewardBadge}>
-                            <MaterialCommunityIcons name="fire" size={16} color="#22c55e" />
-                            <Text style={styles.rewardBadgeText}>+{currentCategory.rewardPerQ} coins / correct</Text>
+                            <MaterialCommunityIcons name="lightning-bolt" size={15} color="#facc15" />
+                            <Text style={styles.rewardBadgeText}>+{rewardPoints} Correct • -{penaltyPoints} Wrong</Text>
                         </View>
                     </View>
 
@@ -555,14 +711,54 @@ export default function QuizScreen({ navigation, route }) {
                 {/* QUESTION CARD */}
                 <View style={styles.questionCard}>
                     <View style={styles.questionHeader}>
-                        <View style={[styles.categoryBadge, { backgroundColor: currentCategory.color + "22", borderColor: currentCategory.color }]}>
-                            <MaterialCommunityIcons name={currentCategory.icon} size={14} color={currentCategory.color} style={{ marginRight: 4 }} />
-                            <Text style={[styles.categoryBadgeText, { color: currentCategory.color }]}>{currentCategory.title}</Text>
+                        <View style={[styles.categoryBadge, { backgroundColor: (isUsingApi ? "#0284c7" : currentCategory.color) + "22", borderColor: isUsingApi ? "#38bdf8" : currentCategory.color }]}>
+                            <MaterialCommunityIcons name={isUsingApi ? "earth" : currentCategory.icon} size={14} color={isUsingApi ? "#38bdf8" : currentCategory.color} style={{ marginRight: 5 }} />
+                            <Text style={[styles.categoryBadgeText, { color: isUsingApi ? "#38bdf8" : currentCategory.color }]}>
+                                {isUsingApi ? "OpenTDB Live Trivia" : currentCategory.title}
+                            </Text>
                         </View>
-                        <Text style={styles.streakText}>Session: +{sessionCoins} 🪙</Text>
+
+                        {/* ⏱️ 35s COUNTDOWN TIMER BADGE */}
+                        <View style={[styles.timerBadge, timeLeft <= 10 && styles.timerBadgeWarning]}>
+                            <MaterialCommunityIcons
+                                name={timeLeft <= 10 ? "clock-alert-outline" : "timer-sand"}
+                                size={15}
+                                color={timeLeft <= 10 ? "#ef4444" : "#38bdf8"}
+                            />
+                            <Text style={[styles.timerText, timeLeft <= 10 && styles.timerTextWarning]}>
+                                {isAnswered && selectedOption === -1 ? "Time's Up" : `${timeLeft}s`}
+                            </Text>
+                        </View>
+
+                        <View style={styles.roundPointsBadge}>
+                            <Text style={styles.streakText}>Points: {sessionPoints > 0 ? "+" + sessionPoints : sessionPoints} 🪙</Text>
+                        </View>
                     </View>
 
-                    <Text style={styles.questionTitle}>{currentQuestion.question}</Text>
+                    {/* ANIMATED 35s COUNTDOWN LINE */}
+                    <View style={styles.timerBarTrack}>
+                        <Animated.View
+                            style={[
+                                styles.timerBarFill,
+                                {
+                                    width: timerAnim.interpolate({
+                                        inputRange: [0, 1],
+                                        outputRange: ["0%", "100%"],
+                                    }),
+                                    backgroundColor: timeLeft <= 10 ? "#ef4444" : "#38bdf8",
+                                },
+                            ]}
+                        />
+                    </View>
+
+                    {isLoadingApi ? (
+                        <View style={{ paddingVertical: 20, alignItems: "center" }}>
+                            <ActivityIndicator size="small" color="#38bdf8" />
+                            <Text style={{ color: "#94a3b8", fontSize: 13, marginTop: 8 }}>Loading OpenTDB Question...</Text>
+                        </View>
+                    ) : (
+                        <Text style={styles.questionTitle}>{currentQuestion.question}</Text>
+                    )}
                 </View>
 
                 {/* OPTIONS */}
@@ -614,53 +810,96 @@ export default function QuizScreen({ navigation, route }) {
                     })}
                 </View>
 
-                {/* FACT / EXPLANATION CARD (Visible after answering) */}
+                {/* PROMPT BEFORE ANSWER */}
+                {!isAnswered && (
+                    <View style={styles.hintContainer}>
+                        <MaterialCommunityIcons name="clock-outline" size={18} color="#38bdf8" style={{ marginRight: 6 }} />
+                        <Text style={styles.hintText}>
+                            {timeLeft <= 10 ? `⚠️ Hurry! Only ${timeLeft}s remaining` : "Answer within 35 seconds to win points"}
+                        </Text>
+                    </View>
+                )}
+
+                {/* FACT / EXPLANATION CARD (Visible after answering or timeout) */}
                 {isAnswered && (
                     <View style={styles.factCard}>
-                        <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 6 }}>
-                            <MaterialCommunityIcons name="lightbulb-on" size={18} color="#facc15" style={{ marginRight: 6 }} />
-                            <Text style={styles.factTitle}>Did you know?</Text>
+                        <View style={styles.factHeaderRow}>
+                            <View style={{ flexDirection: "row", alignItems: "center" }}>
+                                <MaterialCommunityIcons name="lightbulb-on" size={18} color="#facc15" style={{ marginRight: 6 }} />
+                                <Text style={styles.factTitle}>
+                                    {selectedOption === -1 ? "⏰ Time Ran Out!" : "Did you know?"}
+                                </Text>
+                            </View>
                             {selectedOption === currentQuestion.correctIndex ? (
-                                <Text style={styles.factBadgeSuccess}>+ {currentCategory.rewardPerQ} Coins Won!</Text>
+                                <View style={styles.factBadgeSuccess}>
+                                    <MaterialCommunityIcons name="plus-circle" size={13} color="#4ade80" style={{ marginRight: 3 }} />
+                                    <Text style={styles.factBadgeSuccessText}>+{rewardPoints} Point Added!</Text>
+                                </View>
+                            ) : selectedOption === -1 ? (
+                                <View style={styles.factBadgeTimeout}>
+                                    <MaterialCommunityIcons name="shield-check" size={13} color="#facc15" style={{ marginRight: 3 }} />
+                                    <Text style={styles.factBadgeTimeoutText}>0 Coins (No Penalty)</Text>
+                                </View>
                             ) : (
-                                <Text style={styles.factBadgeWrong}>Incorrect</Text>
+                                <View style={styles.factBadgeWrong}>
+                                    <MaterialCommunityIcons name="minus-circle" size={13} color="#f87171" style={{ marginRight: 3 }} />
+                                    <Text style={styles.factBadgeWrongText}>-{penaltyPoints} Point Deducted</Text>
+                                </View>
                             )}
                         </View>
-                        <Text style={styles.factText}>{currentQuestion.fact}</Text>
+                        <Text style={styles.factText}>
+                            {selectedOption === -1
+                                ? `Time expired before answering. The correct answer was "${currentQuestion.options[currentQuestion.correctIndex]}". No coins were deducted.`
+                                : currentQuestion.fact}
+                        </Text>
 
-                        <TouchableOpacity style={[styles.nextBtn, { backgroundColor: currentCategory.color }]} onPress={handleNextQuestion}>
+                        <TouchableOpacity 
+                            style={[styles.nextBtn, { backgroundColor: currentCategory.color }]} 
+                            onPress={handleNextQuestion}
+                            activeOpacity={0.8}
+                        >
                             <Text style={styles.nextBtnText}>
-                                {currentQuestionIndex < questions.length - 1 ? "Next Question" : "View Results & Win"}
+                                {currentQuestionIndex < activeQuestions.length - 1 ? "Next Question (Ad) ➔" : "View Results & Win 🏆"}
                             </Text>
-                            <MaterialCommunityIcons name="arrow-right" size={20} color="#fff" style={{ marginLeft: 6 }} />
                         </TouchableOpacity>
                     </View>
                 )}
 
-                {/* ALL CATEGORIES QUICK PICK */}
-                <View style={styles.allCategoriesSection}>
-                    <Text style={styles.sectionHeading}>Explore All Biology Categories</Text>
-                    <View style={styles.categoriesGrid}>
-                        {QUIZ_CATEGORIES.map((cat) => (
-                            <TouchableOpacity
-                                key={cat.id}
-                                style={[
-                                    styles.gridCard,
-                                    cat.id === selectedCategoryId && { borderColor: cat.color, backgroundColor: cat.color + "15" },
-                                ]}
-                                onPress={() => switchCategory(cat.id)}
-                            >
-                                <View style={[styles.gridIconBox, { backgroundColor: cat.color }]}>
-                                    <MaterialCommunityIcons name={cat.icon} size={22} color="#fff" />
-                                </View>
-                                <Text style={styles.gridCardTitle}>{cat.title}</Text>
-                                <Text style={styles.gridCardSub}>+{cat.rewardPerQ} coins/Q</Text>
-                            </TouchableOpacity>
-                        ))}
+                {/* CLEAN BOTTOM CATEGORIES SELECTOR */}
+                <View style={styles.bottomCategorySwitch}>
+                    <View style={styles.bottomCategoryHeader}>
+                        <Text style={styles.bottomCategoryTitle}>Explore Other Biology Topics</Text>
+                        <Text style={styles.bottomCategorySub}>Tap to switch</Text>
                     </View>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 4 }}>
+                        {QUIZ_CATEGORIES.map((cat) => {
+                            const isCurrent = cat.id === selectedCategoryId;
+                            return (
+                                <TouchableOpacity
+                                    key={cat.id}
+                                    style={[
+                                        styles.compactCatChip,
+                                        isCurrent && { borderColor: cat.color, backgroundColor: cat.color + "20" }
+                                    ]}
+                                    onPress={() => switchCategory(cat.id)}
+                                    activeOpacity={0.7}
+                                >
+                                    <View style={[styles.compactCatIcon, { backgroundColor: cat.color }]}>
+                                        <MaterialCommunityIcons name={cat.icon} size={16} color="#fff" />
+                                    </View>
+                                    <View>
+                                        <Text style={[styles.compactCatTitle, isCurrent && { color: "#fff", fontWeight: "700" }]}>
+                                            {cat.title}
+                                        </Text>
+                                        <Text style={styles.compactCatSub}>+{rewardPoints} / -{penaltyPoints} pts</Text>
+                                    </View>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
                 </View>
 
-                <View style={{ height: 40 }} />
+                <View style={{ height: 25 }} />
             </ScrollView>
 
             {/* BOTTOM ADMOB BANNER */}
@@ -682,23 +921,29 @@ export default function QuizScreen({ navigation, route }) {
                         {/* STATS */}
                         <View style={styles.statsRow}>
                             <View style={styles.statBox}>
-                                <Text style={styles.statNumber}>{score}/{questions.length}</Text>
-                                <Text style={styles.statLabel}>Score</Text>
+                                <Text style={[styles.statNumber, { color: "#22c55e" }]}>{correctCount}</Text>
+                                <Text style={styles.statLabel}>Correct (+{rewardPoints})</Text>
                             </View>
                             <View style={styles.statDivider} />
                             <View style={styles.statBox}>
-                                <Text style={[styles.statNumber, { color: "#22c55e" }]}>+{sessionCoins}</Text>
-                                <Text style={styles.statLabel}>Coins Won</Text>
+                                <Text style={[styles.statNumber, { color: "#ef4444" }]}>{wrongCount}</Text>
+                                <Text style={styles.statLabel}>Wrong (-{penaltyPoints})</Text>
                             </View>
                             <View style={styles.statDivider} />
                             <View style={styles.statBox}>
-                                <Text style={styles.statNumber}>{Math.round((score / questions.length) * 100)}%</Text>
-                                <Text style={styles.statLabel}>Accuracy</Text>
+                                <Text style={[styles.statNumber, { color: sessionPoints >= 0 ? "#22c55e" : "#ef4444" }]}>
+                                    {sessionPoints > 0 ? "+" + sessionPoints : sessionPoints}
+                                </Text>
+                                <Text style={styles.statLabel}>Net Points</Text>
                             </View>
                         </View>
 
                         <Text style={styles.coinsCreditedNotice}>
-                            🎉 {sessionCoins} coins have been added to your wallet!
+                            {sessionPoints > 0
+                                ? `🎉 +${sessionPoints} points added to your wallet!`
+                                : sessionPoints < 0
+                                ? `⚠️ ${sessionPoints} points deducted from your wallet`
+                                : "No points change in this round"}
                         </Text>
 
                         {/* ACTION BUTTONS */}
@@ -727,30 +972,38 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "space-between",
-        paddingHorizontal: 15,
-        paddingVertical: 12,
+        paddingHorizontal: 16,
+        paddingTop: 10,
+        paddingBottom: 12,
+        backgroundColor: "#0a0f1f",
         borderBottomWidth: 1,
         borderBottomColor: "#1e293b",
     },
     backBtn: {
-        padding: 8,
+        width: 38,
+        height: 38,
         borderRadius: 10,
         backgroundColor: "#1e293b",
+        alignItems: "center",
+        justifyContent: "center",
     },
     titleContainer: {
         alignItems: "center",
         flex: 1,
-        marginHorizontal: 10,
+        marginHorizontal: 8,
     },
     headerTitle: {
-        fontSize: 17,
+        fontSize: 16,
         fontWeight: "700",
         color: "#fff",
+        textAlign: "center",
     },
     headerSubtitle: {
-        fontSize: 12,
-        color: "#94a3b8",
-        marginTop: 1,
+        fontSize: 11,
+        color: "#38bdf8",
+        marginTop: 2,
+        fontWeight: "600",
+        textAlign: "center",
     },
     balanceTag: {
         flexDirection: "row",
@@ -758,9 +1011,10 @@ const styles = StyleSheet.create({
         backgroundColor: "#1e293b",
         paddingHorizontal: 10,
         paddingVertical: 6,
-        borderRadius: 20,
+        borderRadius: 18,
         borderWidth: 1,
-        borderColor: "#facc1533",
+        borderColor: "#facc1544",
+        marginRight: 2,
     },
     balanceText: {
         color: "#facc15",
@@ -770,22 +1024,23 @@ const styles = StyleSheet.create({
     },
     categoryScrollContainer: {
         backgroundColor: "#0d1424",
-        paddingVertical: 8,
+        paddingVertical: 10,
         borderBottomWidth: 1,
         borderBottomColor: "#1e293b",
     },
     categoryScroll: {
-        paddingHorizontal: 12,
+        paddingHorizontal: 14,
+        alignItems: "center",
     },
     categoryChip: {
         flexDirection: "row",
         alignItems: "center",
-        paddingHorizontal: 14,
+        paddingHorizontal: 13,
         paddingVertical: 7,
-        borderRadius: 20,
+        borderRadius: 18,
         backgroundColor: "#1e293b",
         marginRight: 8,
-        borderWidth: 1,
+        borderWidth: 1.5,
         borderColor: "#334155",
     },
     categoryChipText: {
@@ -798,7 +1053,7 @@ const styles = StyleSheet.create({
         fontWeight: "700",
     },
     scrollContent: {
-        padding: 15,
+        padding: 16,
     },
     progressCard: {
         backgroundColor: "#111827",
@@ -846,7 +1101,7 @@ const styles = StyleSheet.create({
         backgroundColor: "#111827",
         borderRadius: 16,
         padding: 18,
-        marginBottom: 16,
+        marginBottom: 14,
         borderWidth: 1,
         borderColor: "#1e293b",
     },
@@ -859,14 +1114,57 @@ const styles = StyleSheet.create({
     categoryBadge: {
         flexDirection: "row",
         alignItems: "center",
-        paddingHorizontal: 10,
+        paddingHorizontal: 9,
         paddingVertical: 4,
-        borderRadius: 12,
+        borderRadius: 10,
         borderWidth: 1,
     },
     categoryBadgeText: {
         fontSize: 11,
         fontWeight: "700",
+    },
+    timerBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#0f172a",
+        paddingHorizontal: 9,
+        paddingVertical: 3,
+        borderRadius: 10,
+        borderWidth: 1.5,
+        borderColor: "#38bdf8",
+    },
+    timerBadgeWarning: {
+        borderColor: "#ef4444",
+        backgroundColor: "rgba(239, 68, 68, 0.2)",
+    },
+    timerText: {
+        color: "#38bdf8",
+        fontSize: 12,
+        fontWeight: "700",
+        marginLeft: 4,
+    },
+    timerTextWarning: {
+        color: "#ef4444",
+    },
+    timerBarTrack: {
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: "#1e293b",
+        overflow: "hidden",
+        marginTop: 4,
+        marginBottom: 12,
+    },
+    timerBarFill: {
+        height: "100%",
+        borderRadius: 2,
+    },
+    roundPointsBadge: {
+        backgroundColor: "#1e293b",
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: "#334155",
     },
     streakText: {
         color: "#facc15",
@@ -876,11 +1174,11 @@ const styles = StyleSheet.create({
     questionTitle: {
         fontSize: 17,
         fontWeight: "700",
-        color: "#fff",
-        lineHeight: 24,
+        color: "#f8fafc",
+        lineHeight: 25,
     },
     optionsContainer: {
-        marginBottom: 14,
+        marginBottom: 8,
     },
     optionCard: {
         flexDirection: "row",
@@ -888,7 +1186,7 @@ const styles = StyleSheet.create({
         backgroundColor: "#111827",
         borderRadius: 14,
         padding: 14,
-        marginVertical: 6,
+        marginVertical: 5,
         borderWidth: 1.5,
         borderColor: "#1e293b",
     },
@@ -898,11 +1196,11 @@ const styles = StyleSheet.create({
     },
     optionCorrect: {
         borderColor: "#22c55e",
-        backgroundColor: "#16a34a20",
+        backgroundColor: "#16a34a22",
     },
     optionWrong: {
         borderColor: "#ef4444",
-        backgroundColor: "#dc262620",
+        backgroundColor: "#dc262622",
     },
     optionLetterBox: {
         width: 32,
@@ -938,101 +1236,165 @@ const styles = StyleSheet.create({
         color: "#f87171",
         fontWeight: "600",
     },
+    hintContainer: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+        backgroundColor: "#0f172a",
+        borderRadius: 10,
+        marginVertical: 8,
+        borderWidth: 1,
+        borderColor: "#1e293b",
+    },
+    hintText: {
+        color: "#64748b",
+        fontSize: 12,
+        fontWeight: "500",
+    },
     factCard: {
         backgroundColor: "#1e293b",
-        borderRadius: 14,
+        borderRadius: 16,
         padding: 16,
-        marginBottom: 20,
+        marginVertical: 10,
         borderLeftWidth: 4,
         borderLeftColor: "#facc15",
+        borderWidth: 1,
+        borderColor: "#334155",
+    },
+    factHeaderRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 8,
     },
     factTitle: {
         color: "#facc15",
         fontWeight: "700",
-        fontSize: 13,
-        flex: 1,
+        fontSize: 14,
     },
     factBadgeSuccess: {
-        color: "#4ade80",
-        fontWeight: "700",
-        fontSize: 12,
+        flexDirection: "row",
+        alignItems: "center",
         backgroundColor: "#14532d",
         paddingHorizontal: 8,
-        paddingVertical: 2,
+        paddingVertical: 3,
         borderRadius: 8,
     },
-    factBadgeWrong: {
-        color: "#f87171",
+    factBadgeSuccessText: {
+        color: "#4ade80",
         fontWeight: "700",
-        fontSize: 12,
+        fontSize: 11,
+    },
+    factBadgeWrong: {
+        flexDirection: "row",
+        alignItems: "center",
         backgroundColor: "#7f1d1d",
         paddingHorizontal: 8,
-        paddingVertical: 2,
+        paddingVertical: 3,
         borderRadius: 8,
+    },
+    factBadgeWrongText: {
+        color: "#f87171",
+        fontWeight: "700",
+        fontSize: 11,
+    },
+    factBadgeTimeout: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "rgba(234, 179, 8, 0.2)",
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 8,
+    },
+    factBadgeTimeoutText: {
+        color: "#facc15",
+        fontWeight: "700",
+        fontSize: 11,
     },
     factText: {
         color: "#cbd5e1",
         fontSize: 13,
-        lineHeight: 19,
-        marginBottom: 12,
+        lineHeight: 20,
+        marginBottom: 14,
     },
     nextBtn: {
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "center",
-        paddingVertical: 12,
+        paddingVertical: 13,
         borderRadius: 12,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        elevation: 3,
     },
     nextBtnText: {
         color: "#fff",
         fontWeight: "700",
-        fontSize: 14,
+        fontSize: 15,
     },
-    allCategoriesSection: {
-        marginTop: 10,
+    bottomCategorySwitch: {
+        marginTop: 18,
+        paddingTop: 14,
+        borderTopWidth: 1,
+        borderTopColor: "#1e293b",
     },
-    sectionHeading: {
-        color: "#fff",
-        fontSize: 16,
-        fontWeight: "700",
-        marginBottom: 12,
-    },
-    categoriesGrid: {
+    bottomCategoryHeader: {
         flexDirection: "row",
-        flexWrap: "wrap",
         justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 10,
     },
-    gridCard: {
-        width: (width - 42) / 2,
+    bottomCategoryTitle: {
+        color: "#e2e8f0",
+        fontSize: 13,
+        fontWeight: "700",
+    },
+    bottomCategorySub: {
+        color: "#38bdf8",
+        fontSize: 11,
+        fontWeight: "600",
+    },
+    compactCatChip: {
+        flexDirection: "row",
+        alignItems: "center",
         backgroundColor: "#111827",
-        borderRadius: 14,
-        padding: 12,
-        marginBottom: 12,
-        borderWidth: 1,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 12,
+        marginRight: 10,
+        borderWidth: 1.5,
         borderColor: "#1e293b",
     },
-    gridIconBox: {
-        width: 38,
-        height: 38,
-        borderRadius: 10,
+    compactCatIcon: {
+        width: 28,
+        height: 28,
+        borderRadius: 8,
         alignItems: "center",
         justifyContent: "center",
-        marginBottom: 8,
+        marginRight: 8,
     },
-    gridCardTitle: {
-        color: "#fff",
+    compactCatTitle: {
+        color: "#94a3b8",
+        fontSize: 12,
         fontWeight: "600",
-        fontSize: 13,
     },
-    gridCardSub: {
+    compactCatSub: {
         color: "#22c55e",
-        fontSize: 11,
-        marginTop: 3,
-        fontWeight: "600",
+        fontSize: 10,
+        marginTop: 2,
     },
     bannerWrapper: {
         alignItems: "center",
+        justifyContent: "center",
         backgroundColor: "#0a0f1f",
+        paddingTop: 4,
+        paddingBottom: Platform.OS === "android" ? 10 : 20,
+        borderTopWidth: 1,
+        borderTopColor: "#1e293b",
     },
     modalOverlay: {
         flex: 1,

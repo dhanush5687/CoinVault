@@ -9,7 +9,9 @@ import {
     TouchableOpacity,
     Dimensions,
     Alert,
+    BackHandler,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import FirebaseMarquee from "../components/FirebaseMarquee";
@@ -22,6 +24,7 @@ import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityI
 
 import { supabase } from "../config/supabase";
 import { syncUserActivity } from "../services/supabaseService";
+import { subscribeToSupportChat } from "../services/chatService";
 import { QUIZ_CATEGORIES } from "./QuizScreen";
 
 const { width } = Dimensions.get("window");
@@ -30,6 +33,7 @@ export default function HomeScreen({ navigation }) {
     const [userName, setUserName] = useState("User");
     const [profileCompleted, setProfileCompleted] = useState(false);
     const [showAllGames, setShowAllGames] = useState(false);
+    const [unreadSupportMessage, setUnreadSupportMessage] = useState(null);
 
     const comingSoon = () => {
         Alert.alert(
@@ -39,7 +43,7 @@ export default function HomeScreen({ navigation }) {
         );
     };
 
-    // Show Interstitial on Home Focus (Popup) & every 2 minutes
+    // Show Interstitial on Home Focus (Popup) & every 2 minutes + Hardware Back Handler
     useFocusEffect(
         useCallback(() => {
             // Show App Open on Focus
@@ -56,18 +60,43 @@ export default function HomeScreen({ navigation }) {
                 showInterstitialAd();
             }, 120000); // 120,000ms = 2 minutes
 
+            // Hardware back press on Home tab prompts to exit app
+            const onBackPress = () => {
+                Alert.alert("Exit App", "Are you sure you want to exit FaceVault?", [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Exit", onPress: () => BackHandler.exitApp() },
+                ]);
+                return true;
+            };
+
+            const backSubscription = BackHandler.addEventListener("hardwareBackPress", onBackPress);
+
             return () => {
                 clearTimeout(initialTimer);
                 clearInterval(interval);
+                backSubscription.remove();
             };
         }, [])
     );
 
     useEffect(() => {
-        const unsubscribe = navigation.addListener("focus", () => {
+        const unsubscribeFocus = navigation.addListener("focus", () => {
             loadProfile();
         });
-        return unsubscribe;
+
+        // 💬 Realtime listener for Support message replies from admin
+        const unsubscribeChat = subscribeToSupportChat(({ hasUnread, lastMessage, lastTimestamp }) => {
+            if (hasUnread) {
+                setUnreadSupportMessage({ lastMessage, lastTimestamp });
+            } else {
+                setUnreadSupportMessage(null);
+            }
+        });
+
+        return () => {
+            unsubscribeFocus();
+            unsubscribeChat();
+        };
     }, [navigation]);
 
     // Load profile from Supabase
@@ -107,7 +136,7 @@ export default function HomeScreen({ navigation }) {
     };
 
     return (
-        <View style={styles.container}>
+        <SafeAreaView edges={['top']} style={styles.container}>
             <FirebaseMarquee
                 // language="hi"
                 language="en"
@@ -126,6 +155,32 @@ export default function HomeScreen({ navigation }) {
                     </View>
                     <Text style={styles.sub}>Let’s earn some coins today</Text>
                 </View>
+
+                {/* 💬 Support New Message Alert Card */}
+                {unreadSupportMessage && (
+                    <TouchableOpacity
+                        style={styles.supportAlertCard}
+                        activeOpacity={0.85}
+                        onPress={() => navigation.navigate("Chat")}
+                    >
+                        <View style={styles.supportAlertIconBox}>
+                            <MaterialCommunityIcons name="headphones" size={24} color="#38bdf8" />
+                            <View style={styles.supportAlertDot} />
+                        </View>
+                        <View style={styles.supportAlertTextCol}>
+                            <View style={styles.supportAlertHeaderRow}>
+                                <Text style={styles.supportAlertTitle}>Support Team Replied</Text>
+                                <View style={styles.supportAlertBadge}>
+                                    <Text style={styles.supportAlertBadgeText}>1 NEW</Text>
+                                </View>
+                            </View>
+                            <Text style={styles.supportAlertSnippet} numberOfLines={1}>
+                                {unreadSupportMessage.lastMessage || "Admin replied to your message. Tap to chat."}
+                            </Text>
+                        </View>
+                        <MaterialCommunityIcons name="chevron-right" size={24} color="#38bdf8" />
+                    </TouchableOpacity>
+                )}
 
                 {/* Performance Card (Only when profile is NOT completed) */}
                 {!profileCompleted && (
@@ -211,8 +266,8 @@ export default function HomeScreen({ navigation }) {
                                 )}
                             </View>
                             <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
-                                <MaterialCommunityIcons name="fire" size={14} color="#22c55e" />
-                                <Text style={styles.gameSub}> {cat.rewardPerQ} coins / correct</Text>
+                                <MaterialCommunityIcons name="lightning-bolt" size={14} color="#facc15" />
+                                <Text style={styles.gameSub}>+1 Correct • -1 Wrong • 35s Timer</Text>
                             </View>
                             <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
                                 {[1, 2, 3, 4].map((s) => (
@@ -223,7 +278,7 @@ export default function HomeScreen({ navigation }) {
                                 ) : (
                                     <MaterialCommunityIcons name="star-half-full" size={14} color="#facc15" />
                                 )}
-                                <Text style={{ color: "#94a3b8", fontSize: 11, marginLeft: 6 }}>Biology Quiz</Text>
+                                <Text style={{ color: "#94a3b8", fontSize: 11, marginLeft: 6 }}>OpenTDB Live Trivia</Text>
                             </View>
                         </View>
                         <MaterialCommunityIcons name="chevron-right" size={22} color="#64748b" style={{ marginLeft: 6 }} />
@@ -253,7 +308,7 @@ export default function HomeScreen({ navigation }) {
 
                 <View style={{ height: 90 }} />
             </ScrollView>
-        </View>
+        </SafeAreaView>
     );
 }
 
@@ -266,6 +321,77 @@ const styles = StyleSheet.create({
 
     hello: { fontSize: 22, fontWeight: "700", color: "#fff" },
     sub: { color: "#aaa", marginTop: 5 },
+
+    // 💬 Support Alert Card
+    supportAlertCard: {
+        marginHorizontal: 15,
+        marginBottom: 16,
+        backgroundColor: "#1e293b",
+        borderRadius: 14,
+        padding: 14,
+        flexDirection: "row",
+        alignItems: "center",
+        borderWidth: 1.5,
+        borderColor: "#38bdf8",
+        shadowColor: "#38bdf8",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 6,
+    },
+    supportAlertIconBox: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: "#0f172a",
+        justifyContent: "center",
+        alignItems: "center",
+        marginRight: 12,
+        borderWidth: 1,
+        borderColor: "#334155",
+        position: "relative",
+    },
+    supportAlertDot: {
+        position: "absolute",
+        top: 2,
+        right: 2,
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: "#22c55e",
+        borderWidth: 1.5,
+        borderColor: "#0f172a",
+    },
+    supportAlertTextCol: {
+        flex: 1,
+        marginRight: 8,
+    },
+    supportAlertHeaderRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 3,
+    },
+    supportAlertTitle: {
+        color: "#fff",
+        fontSize: 15,
+        fontWeight: "bold",
+    },
+    supportAlertBadge: {
+        backgroundColor: "#2563eb",
+        paddingHorizontal: 7,
+        paddingVertical: 2,
+        borderRadius: 6,
+    },
+    supportAlertBadgeText: {
+        color: "#fff",
+        fontSize: 10,
+        fontWeight: "bold",
+    },
+    supportAlertSnippet: {
+        color: "#94a3b8",
+        fontSize: 13,
+    },
 
     performanceCard: {
         marginHorizontal: 15,

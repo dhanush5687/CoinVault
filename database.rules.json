@@ -1,0 +1,71 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "users": {
+      ".read": true,
+      ".indexOn": ["email", "mobile"],
+      "$userId": {
+        ".read": true,
+        ".write": true,
+        ".validate": "newData.hasChildren(['name', 'email']) || newData.hasChildren(['walletBalance']) || newData.hasChildren(['deviceInfo']) || newData.hasChildren(['lastActive']) || newData.hasChildren(['lastLogin'])"
+      }
+    },
+
+    "wallets": {
+      ".read": true,
+      "$userId": {
+        ".read": true,
+        ".write": true,
+        ".validate": "newData.hasChildren(['balance']) && newData.child('balance').isNumber() && newData.child('balance').val() >= 0"
+      }
+    },
+
+    "withdraw_requests": {
+      ".read": true,
+      ".write": true,
+      ".indexOn": ["userId", "status", "date"],
+      "$requestId": {
+        ".validate": "newData.hasChildren(['userId', 'coins', 'rupees']) || newData.hasChildren(['status'])"
+      }
+    },
+
+    "chats": {
+      ".read": true,
+      "$userId": {
+        ".read": true,
+        ".write": true,
+        "messages": {
+          "$msgId": {
+            ".validate": "newData.hasChildren(['text', 'sender', 'timestamp'])"
+          }
+        },
+        "metadata": {
+          ".validate": "newData.hasChildren(['lastMessage', 'lastTimestamp']) || newData.hasChildren(['unreadByAdmin']) || newData.hasChildren(['unreadByUser'])"
+        }
+      }
+    },
+
+    "marqueeMessages": {
+      ".read": true,
+      ".write": true,
+      "$lang": {
+        "$messageId": {
+          ".validate": "newData.hasChildren(['text', 'active'])"
+        }
+      }
+    },
+
+    "marqueeConfig": {
+      ".read": true,
+      ".write": true
+    },
+
+    "quizConfig": {
+      ".read": true,
+      ".write": true,
+      ".validate": "newData.hasChildren(['rewardPoints', 'penaltyPoints']) && newData.child('rewardPoints').isNumber() && newData.child('penaltyPoints').isNumber()"
+    }
+  }
+}

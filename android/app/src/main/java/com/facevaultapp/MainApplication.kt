@@ -1,7 +1,6 @@
 package com.facevaultapp
 
-
-import com.stallion.Stallion
+import com.hotupdater.HotUpdater
 
 import android.app.Application
 import com.facebook.react.PackageList
@@ -15,15 +14,14 @@ class MainApplication : Application(), ReactApplication {
   override val reactHost: ReactHost by lazy {
     getDefaultReactHost(
       context = applicationContext,
-      packageList =
-        PackageList(this).packages, 
-          // Packages that cannot be autolinked yet can be added manually here, for example:
-          // add(MyReactNativePackage())
-           jsBundleFilePath = Stallion.getJSBundleFile(applicationContext)
-        
-       
-
-        
+      packageList = PackageList(this).packages.apply {
+        add(VoicePackage())
+      },
+      jsBundleFilePath = if (BuildConfig.DEBUG) {
+        null
+      } else {
+        HotUpdater.getJSBundleFile(applicationContext)
+      }
     )
   }
 

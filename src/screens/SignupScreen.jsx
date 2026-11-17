@@ -51,7 +51,10 @@ export default function SignupScreen({ navigation }) {
 
             if (result.success) {
                 console.log("✅ Auth Success:", result.user?.email);
-                navigation.replace("MainTabs"); // Go to App
+                navigation.reset({
+                    index: 0,
+                    routes: [{ name: "MainTabs" }],
+                });
             } else {
                 const err = result.error || "";
                 // Smart Error Handling

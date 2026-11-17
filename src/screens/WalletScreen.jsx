@@ -13,6 +13,7 @@ import {
   ScrollView,
   ActivityIndicator,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../config/supabase";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
@@ -367,7 +368,7 @@ export default function WalletScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView edges={['top']} style={styles.container}>
       {/* Top Banner */}
       <View style={{ alignItems: "center", marginBottom: 5 }}>
         <BannerAd unitId={ADMOB_BANNER_ID} size={BannerAdSize.ADAPTIVE_BANNER} />
@@ -406,7 +407,7 @@ export default function WalletScreen() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
-        contentContainerStyle={{ paddingBottom: 40 }}
+        contentContainerStyle={{ paddingBottom: 110 }}
       />
 
       {/* Withdraw Modal */}
@@ -538,10 +539,10 @@ export default function WalletScreen() {
       </Modal>
 
       {/* Bottom Banner */}
-      <View style={{ alignItems: "center", marginTop: 5 }}>
+      <View style={{ alignItems: "center", marginTop: 5, paddingBottom: 85 }}>
         <BannerAd unitId={ADMOB_BANNER_ID} size={BannerAdSize.ADAPTIVE_BANNER} />
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 

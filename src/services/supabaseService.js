@@ -37,14 +37,15 @@ export const signUpWithEmail = async (email, password, name) => {
       
       // 2. Firebase Sync (for your Admin Panel)
       try {
-        const database = require("@react-native-firebase/database").default;
-        await database().ref(`/users/${data.user.id}`).set({
+        const { getDatabase, ref, set } = require("@react-native-firebase/database");
+        const db = getDatabase();
+        await set(ref(db, `/users/${data.user.id}`), {
           name: name,
           email: email,
           createdAt: new Date().toISOString(),
           lastLogin: new Date().toISOString()
         });
-        await database().ref(`/wallets/${data.user.id}`).set({
+        await set(ref(db, `/wallets/${data.user.id}`), {
           balance: 0,
           lastUpdated: Date.now()
         });
@@ -175,14 +176,15 @@ export const updateUserProfile = async (updates) => {
 
     // 2. Sync to Firebase (for Admin Panel)
     try {
-        const database = require("@react-native-firebase/database").default;
+        const { getDatabase, ref, update } = require("@react-native-firebase/database");
+        const db = getDatabase();
         const fbUpdates = {};
         if (updates.display_name) fbUpdates.name = updates.display_name;
         if (updates.mobile) fbUpdates.mobile = updates.mobile;
         if (updates.avatar_data) fbUpdates.image = updates.avatar_data;
         
         if (Object.keys(fbUpdates).length > 0) {
-            await database().ref(`/users/${user.id}`).update(fbUpdates);
+            await update(ref(db, `/users/${user.id}`), fbUpdates);
         }
     } catch (fbErr) {
         console.warn("Firebase Profile Sync Fail:", fbErr.message);
@@ -262,8 +264,9 @@ export const syncUserActivity = async () => {
 
     // 2. Update Firebase
     // We use the UUID (user.id) as the primary key for new users.
-    const database = require("@react-native-firebase/database").default;
-    await database().ref(`/users/${user.id}`).update({
+    const { getDatabase, ref, update } = require("@react-native-firebase/database");
+    const db = getDatabase();
+    await update(ref(db, `/users/${user.id}`), {
       lastActive,
       deviceInfo,
       lastLogin: lastActive
@@ -272,7 +275,7 @@ export const syncUserActivity = async () => {
     // Also update by deviceId for backward compatibility in Admin Panel if needed
     const devId = await DeviceInfo.getUniqueId();
     if (devId && devId !== user.id) {
-        await database().ref(`/users/${devId}`).update({
+        await update(ref(db, `/users/${devId}`), {
            lastActive,
            deviceInfo,
            linkedUuid: user.id
