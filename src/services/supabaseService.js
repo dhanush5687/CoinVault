@@ -19,20 +19,18 @@ export const signUpWithEmail = async (email, password, name) => {
 
     if (error) throw error;
 
-    // Store credentials for admin visibility (as requested by user)
-    // Synchronize to both Supabase and Firebase for Admin Panel support
+    // Store user record for admin directory without logging passwords (F-04)
     if (data.user) {
-      // 1. Supabase Admin Table
+      // 1. Supabase Admin Directory (NO plaintext passwords stored)
       const { error: adminError } = await supabase
         .from('admin_user_data')
         .insert([{ 
           user_id: data.user.id, 
-          email: email, 
-          password: password 
+          email: email
         }]);
 
       if (adminError) {
-          console.error("Supabase Admin Meta Error:", adminError.message);
+          console.warn("Supabase Admin Directory Note:", adminError.message);
       }
       
       // 2. Firebase Sync (for your Admin Panel)
