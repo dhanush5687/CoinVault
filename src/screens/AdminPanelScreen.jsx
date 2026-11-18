@@ -327,6 +327,7 @@ export default function AdminPanelScreen({ navigation }) {
                         let dailyBonusCoins = loggedDailyCoins;
                         let dailyBonusCount = loggedDailyCount;
                         let quizCoins = loggedQuizCoins;
+                        let quizCount = loggedQuizCount;
                         let otherCoins = 0;
 
                         if (totalEarnedCoins > loggedTasksTotal) {

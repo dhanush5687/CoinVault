@@ -51,9 +51,10 @@ export const loadAppOpenAd = () => {
       lastErrorTime = Date.now();
       console.log("❌ AdMob: Live AppOpen Error:", err.message);
 
+      // Backoff retry: wait 30 seconds before next attempt on 403 or no-fill
       setTimeout(() => {
         loadAppOpenAd();
-      }, 8000);
+      }, 30000);
     });
 
     appOpenAd.load();

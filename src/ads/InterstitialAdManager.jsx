@@ -13,6 +13,8 @@ let isLoading = false;
 let pendingShowOnLoaded = false;
 let pendingOnClosed = null;
 let showTimeoutId = null;
+let retryAttempts = 0;
+let retryTimeoutId = null;
 
 export const loadInterstitialAd = () => {
     if (isLoading || isLoaded) return;
@@ -28,6 +30,8 @@ export const loadInterstitialAd = () => {
         interstitialAd.addAdEventListener(AdEventType.LOADED, () => {
             isLoaded = true;
             isLoading = false;
+            retryAttempts = 0;
+            if (retryTimeoutId) clearTimeout(retryTimeoutId);
             console.log("🚀 AdMob: Live Interstitial Loaded Successfully!");
 
             // If a show request was waiting for this ad to finish loading
@@ -44,10 +48,11 @@ export const loadInterstitialAd = () => {
             isLoaded = false;
             isLoading = false;
             interstitialAd = null;
+            retryAttempts = 0;
             // Preload next live ad after a brief pause
             setTimeout(() => {
                 loadInterstitialAd();
-            }, 2000);
+            }, 3000);
         });
 
         interstitialAd.addAdEventListener(AdEventType.ERROR, (err) => {
@@ -65,10 +70,18 @@ export const loadInterstitialAd = () => {
                 }
             }
 
-            // Retry loading real live ad after cooldown (never use test ads)
-            setTimeout(() => {
-                loadInterstitialAd();
-            }, 8000);
+            // Exponential backoff to avoid spamming AdMob servers on 403 or no-fill:
+            // 1st retry: 20s, 2nd: 40s, 3rd+: 60s (max 4 attempts, then wait for user trigger)
+            retryAttempts += 1;
+            if (retryAttempts <= 4) {
+                const backoffDelay = Math.min(60000, 20000 * retryAttempts);
+                if (retryTimeoutId) clearTimeout(retryTimeoutId);
+                retryTimeoutId = setTimeout(() => {
+                    loadInterstitialAd();
+                }, backoffDelay);
+            } else {
+                console.log("⏸️ AdMob: Interstitial paused after retries. Will retry on next ad trigger.");
+            }
         });
 
         interstitialAd.load();
