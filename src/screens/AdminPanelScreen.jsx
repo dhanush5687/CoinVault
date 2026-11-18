@@ -22,6 +22,14 @@ import Clipboard from "@react-native-clipboard/clipboard";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
 import { supabase } from "../config/supabase";
 import { getQuizConfig, saveQuizConfig, fetchQuestionsFromApi } from "../services/quizService";
+import {
+    getInstalledVersionInfo,
+    getAppVersionConfig,
+    saveAppVersionConfig,
+    fetchPlayStoreVersion,
+    openPlayStore,
+    compareVersions,
+} from "../services/appUpdateService";
 
 export default function AdminPanelScreen({ navigation }) {
     const [activeTab, setActiveTab] = useState("Pending");
@@ -81,6 +89,21 @@ export default function AdminPanelScreen({ navigation }) {
     const [quizPenaltyPoints, setQuizPenaltyPoints] = useState("1");
     const [quizTesting, setQuizTesting] = useState(false);
     const [quizSaving, setQuizSaving] = useState(false);
+
+    // App Version & Force Update States (Admin)
+    const [installedAppInfo] = useState(getInstalledVersionInfo());
+    const [latestVersionInput, setLatestVersionInput] = useState("1.8");
+    const [latestVersionCodeInput, setLatestVersionCodeInput] = useState("3");
+    const [minRequiredVersionInput, setMinRequiredVersionInput] = useState("1.7");
+    const [minRequiredVersionCodeInput, setMinRequiredVersionCodeInput] = useState("3");
+    const [forceUpdateInput, setForceUpdateInput] = useState(false);
+    const [updateTitleInput, setUpdateTitleInput] = useState("Update Available 🚀");
+    const [updateMessageInput, setUpdateMessageInput] = useState("A new version of CoinVault is available on Google Play Store. Please update the app to continue.");
+    const [releaseNotesInput, setReleaseNotesInput] = useState("• Real ads playback & continuous ad marathon\n• Performance enhancements & bug fixes\n• Security & wallet improvements");
+    const [playStoreUrlInput, setPlayStoreUrlInput] = useState(`market://details?id=${installedAppInfo.bundleId}`);
+    const [versionSaving, setVersionSaving] = useState(false);
+    const [checkingPlayStore, setCheckingPlayStore] = useState(false);
+    const [playStoreLiveVer, setPlayStoreLiveVer] = useState(null);
 
     // 🛡️ Enforce Server-Side Admin Authorization (F-12)
     useEffect(() => {
@@ -175,6 +198,13 @@ export default function AdminPanelScreen({ navigation }) {
                 setQuizUseApi(!!config.useApi);
                 setQuizRewardPoints(String(typeof config.rewardPoints === "number" ? config.rewardPoints : 1));
                 setQuizPenaltyPoints(String(typeof config.penaltyPoints === "number" ? config.penaltyPoints : 1));
+                setLoading(false);
+                setRefreshing(false);
+                return;
+            }
+
+            if (activeTab === "Version") {
+                await fetchVersionConfig();
                 setLoading(false);
                 setRefreshing(false);
                 return;
@@ -824,6 +854,88 @@ export default function AdminPanelScreen({ navigation }) {
         setQuizPenaltyPoints("1");
     };
 
+    // App Version & Force Update Handlers
+    const fetchVersionConfig = async () => {
+        try {
+            const config = await getAppVersionConfig();
+            if (config) {
+                setLatestVersionInput(String(config.latestVersion || installedAppInfo.version));
+                setLatestVersionCodeInput(String(config.latestVersionCode || installedAppInfo.buildNumber));
+                setMinRequiredVersionInput(String(config.minRequiredVersion || installedAppInfo.version));
+                setMinRequiredVersionCodeInput(String(config.minRequiredVersionCode || installedAppInfo.buildNumber));
+                setForceUpdateInput(config.forceUpdate === true);
+                setUpdateTitleInput(config.title || "Update Available 🚀");
+                setUpdateMessageInput(config.message || "A new version of CoinVault is available on Google Play Store.");
+                setReleaseNotesInput(config.releaseNotes || "");
+                setPlayStoreUrlInput(config.updateUrl || `market://details?id=${installedAppInfo.bundleId}`);
+            }
+        } catch (e) {
+            console.error("fetchVersionConfig error:", e);
+        }
+    };
+
+    const handleSaveVersionConfig = async () => {
+        setVersionSaving(true);
+        const res = await saveAppVersionConfig({
+            latestVersion: latestVersionInput.trim(),
+            latestVersionCode: parseInt(latestVersionCodeInput, 10) || installedAppInfo.buildNumber,
+            minRequiredVersion: minRequiredVersionInput.trim(),
+            minRequiredVersionCode: parseInt(minRequiredVersionCodeInput, 10) || installedAppInfo.buildNumber,
+            forceUpdate: forceUpdateInput,
+            title: updateTitleInput.trim(),
+            message: updateMessageInput.trim(),
+            releaseNotes: releaseNotesInput.trim(),
+            updateUrl: playStoreUrlInput.trim(),
+            playStoreUrl: `https://play.google.com/store/apps/details?id=${installedAppInfo.bundleId}`,
+        });
+        setVersionSaving(false);
+        if (res.success) {
+            Alert.alert("Success 🎉", "App version & update rules published! All user devices will receive these rules in real time.");
+        } else {
+            Alert.alert("Error", "Failed to save version rules: " + res.error);
+        }
+    };
+
+    const handleCheckPlayStoreLive = async () => {
+        setCheckingPlayStore(true);
+        const liveVer = await fetchPlayStoreVersion(installedAppInfo.bundleId);
+        setCheckingPlayStore(false);
+        if (liveVer) {
+            setPlayStoreLiveVer(liveVer);
+            Alert.alert(
+                "Play Store Live Version 📲",
+                `Found version v${liveVer} on Google Play Store.\n\nInstalled App: v${installedAppInfo.version}\nConfigured Latest: v${latestVersionInput}`,
+                [
+                    { text: "Keep Existing", style: "cancel" },
+                    {
+                        text: `Apply v${liveVer}`,
+                        onPress: () => {
+                            setLatestVersionInput(liveVer);
+                            setMinRequiredVersionInput(liveVer);
+                        }
+                    }
+                ]
+            );
+        } else {
+            Alert.alert(
+                "Play Store Check",
+                `Could not fetch scraped version from Play Store for package "${installedAppInfo.bundleId}". The store listing might be in review or region-restricted.`
+            );
+        }
+    };
+
+    const handleResetVersionDefaults = () => {
+        setLatestVersionInput(installedAppInfo.version);
+        setLatestVersionCodeInput(String(installedAppInfo.buildNumber));
+        setMinRequiredVersionInput(installedAppInfo.version);
+        setMinRequiredVersionCodeInput(String(installedAppInfo.buildNumber));
+        setForceUpdateInput(false);
+        setUpdateTitleInput("Update Available 🚀");
+        setUpdateMessageInput("A new version of CoinVault is available on Google Play Store. Please update the app to continue.");
+        setReleaseNotesInput("• Real ads playback & continuous ad marathon\n• Performance enhancements & bug fixes\n• Security & wallet improvements");
+        setPlayStoreUrlInput(`market://details?id=${installedAppInfo.bundleId}`);
+    };
+
     const renderWithdrawItem = ({ item }) => (
         <View style={styles.card}>
             <View style={styles.cardRow}>
@@ -1332,6 +1444,229 @@ export default function AdminPanelScreen({ navigation }) {
         </ScrollView>
     );
 
+    const renderVersionSettings = () => {
+        const isHigher = compareVersions(latestVersionInput, installedAppInfo.version) > 0 ||
+                         parseInt(latestVersionCodeInput, 10) > installedAppInfo.buildNumber;
+        const isForced = forceUpdateInput ||
+                         compareVersions(minRequiredVersionInput, installedAppInfo.version) > 0 ||
+                         installedAppInfo.buildNumber < parseInt(minRequiredVersionCodeInput, 10);
+
+        return (
+            <ScrollView style={styles.quizSettingsContainer} contentContainerStyle={{ padding: 15 }}>
+                {/* STATUS HEADER CARD */}
+                <View style={styles.quizHeaderCard}>
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                        <View style={{ flex: 1, paddingRight: 8 }}>
+                            <Text style={styles.quizHeaderTitle}>App Version & Update Controller</Text>
+                            <Text style={{ color: "#94a3b8", fontSize: 12, marginTop: 4 }}>
+                                Installed: v{installedAppInfo.version} (Build #{installedAppInfo.buildNumber}) • {installedAppInfo.bundleId}
+                            </Text>
+                        </View>
+                        <View style={[
+                            styles.apiStatusBadge,
+                            { backgroundColor: isForced ? "#7f1d1d" : isHigher ? "#78350f" : "#14532d" }
+                        ]}>
+                            <Text style={[
+                                styles.apiStatusText,
+                                { color: isForced ? "#fca5a5" : isHigher ? "#fcd34d" : "#4ade80" }
+                            ]}>
+                                {isForced ? "● Force Update Active" : isHigher ? "● Soft Update Active" : "● Up-to-Date"}
+                            </Text>
+                        </View>
+                    </View>
+                    <Text style={styles.quizHeaderSub}>
+                        Push mandatory Google Play updates to users when a higher version is published, or manage Over-the-Air (OTA) hot updates.
+                    </Text>
+                </View>
+
+                {/* 1. GOOGLE PLAY LIVE CHECK */}
+                <View style={styles.quizSectionCard}>
+                    <Text style={styles.quizSectionTitle}>1. Google Play Store Verification</Text>
+                    <Text style={{ color: "#94a3b8", fontSize: 13, marginBottom: 12 }}>
+                        Query the live Google Play Store listing to check what version users see right now.
+                    </Text>
+                    <View style={styles.apiBtnRow}>
+                        <TouchableOpacity
+                            style={styles.testApiBtn}
+                            onPress={handleCheckPlayStoreLive}
+                            disabled={checkingPlayStore}
+                        >
+                            {checkingPlayStore ? (
+                                <ActivityIndicator size="small" color="#fff" />
+                            ) : (
+                                <Text style={styles.btnText}>🔍 Check Play Store Now</Text>
+                            )}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={styles.prefillBtn}
+                            onPress={() => openPlayStore()}
+                        >
+                            <Text style={styles.btnText}>↗ Open Play Store App</Text>
+                        </TouchableOpacity>
+                    </View>
+                    {playStoreLiveVer && (
+                        <View style={{ marginTop: 10, padding: 10, backgroundColor: "#0f172a", borderRadius: 8 }}>
+                            <Text style={{ color: "#4ade80", fontSize: 13, fontWeight: "600" }}>
+                                ✓ Play Store Listing Version: v{playStoreLiveVer}
+                            </Text>
+                        </View>
+                    )}
+                </View>
+
+                {/* 2. VERSION TARGETS & FORCE UPDATE TOGGLE */}
+                <View style={styles.quizSectionCard}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                        <Text style={styles.quizSectionTitle}>2. Target Version Rules</Text>
+                        <View style={{ flexDirection: "row", alignItems: "center" }}>
+                            <Text style={{ color: forceUpdateInput ? "#ef4444" : "#94a3b8", fontSize: 13, fontWeight: "bold", marginRight: 8 }}>
+                                {forceUpdateInput ? "Force Update ON" : "Force Update OFF"}
+                            </Text>
+                            <Switch
+                                value={forceUpdateInput}
+                                onValueChange={setForceUpdateInput}
+                                trackColor={{ false: "#334155", true: "#ef4444" }}
+                            />
+                        </View>
+                    </View>
+
+                    <View style={styles.pointsRow}>
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                            <Text style={styles.inputLabel}>Latest Version Name</Text>
+                            <TextInput
+                                style={styles.quizTextInput}
+                                value={latestVersionInput}
+                                onChangeText={setLatestVersionInput}
+                                placeholder="e.g. 1.8"
+                                placeholderTextColor="#64748b"
+                            />
+                        </View>
+                        <View style={{ flex: 1, marginLeft: 8 }}>
+                            <Text style={styles.inputLabel}>Latest Version Code</Text>
+                            <TextInput
+                                style={styles.quizTextInput}
+                                keyboardType="number-pad"
+                                value={latestVersionCodeInput}
+                                onChangeText={setLatestVersionCodeInput}
+                                placeholder="e.g. 3"
+                                placeholderTextColor="#64748b"
+                            />
+                        </View>
+                    </View>
+
+                    <View style={[styles.pointsRow, { marginTop: 8 }]}>
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                            <Text style={styles.inputLabel}>Min Required Version</Text>
+                            <TextInput
+                                style={styles.quizTextInput}
+                                value={minRequiredVersionInput}
+                                onChangeText={setMinRequiredVersionInput}
+                                placeholder="e.g. 1.7"
+                                placeholderTextColor="#64748b"
+                            />
+                        </View>
+                        <View style={{ flex: 1, marginLeft: 8 }}>
+                            <Text style={styles.inputLabel}>Min Required Code</Text>
+                            <TextInput
+                                style={styles.quizTextInput}
+                                keyboardType="number-pad"
+                                value={minRequiredVersionCodeInput}
+                                onChangeText={setMinRequiredVersionCodeInput}
+                                placeholder="e.g. 3"
+                                placeholderTextColor="#64748b"
+                            />
+                        </View>
+                    </View>
+
+                    <Text style={styles.helperText}>
+                        💡 When "Force Update" is ON, users on any version below Target Version cannot dismiss the update screen and must update from Google Play.
+                    </Text>
+                </View>
+
+                {/* 3. RELEASE NOTES & MODAL TEXT */}
+                <View style={styles.quizSectionCard}>
+                    <Text style={styles.quizSectionTitle}>3. Release Notes & Modal Text</Text>
+
+                    <Text style={styles.inputLabel}>Modal Title</Text>
+                    <TextInput
+                        style={styles.quizTextInput}
+                        value={updateTitleInput}
+                        onChangeText={setUpdateTitleInput}
+                        placeholder="Update Available 🚀"
+                        placeholderTextColor="#64748b"
+                    />
+
+                    <Text style={styles.inputLabel}>Modal Message</Text>
+                    <TextInput
+                        style={styles.quizTextInput}
+                        value={updateMessageInput}
+                        onChangeText={setUpdateMessageInput}
+                        placeholder="A new version is available on Google Play..."
+                        placeholderTextColor="#64748b"
+                    />
+
+                    <Text style={styles.inputLabel}>Release Notes (What's New)</Text>
+                    <TextInput
+                        style={[styles.quizTextInput, { height: 90, textAlignVertical: "top" }]}
+                        value={releaseNotesInput}
+                        onChangeText={setReleaseNotesInput}
+                        multiline={true}
+                        numberOfLines={4}
+                        placeholder="• Real ad playback improvements\n• Bug fixes..."
+                        placeholderTextColor="#64748b"
+                    />
+
+                    <Text style={styles.inputLabel}>Play Store Deep Link</Text>
+                    <TextInput
+                        style={styles.quizTextInput}
+                        value={playStoreUrlInput}
+                        onChangeText={setPlayStoreUrlInput}
+                        placeholder="market://details?id=com.facevaultapp"
+                        placeholderTextColor="#64748b"
+                        autoCapitalize="none"
+                    />
+                </View>
+
+                {/* 4. ON-AIR UPDATER (OTA) STATUS */}
+                <View style={styles.quizSectionCard}>
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                        <Text style={styles.quizSectionTitle}>4. On-Air Updater (HotUpdater OTA)</Text>
+                        <View style={[styles.apiStatusBadge, { backgroundColor: "#14532d" }]}>
+                            <Text style={[styles.apiStatusText, { color: "#4ade80" }]}>● Active</Text>
+                        </View>
+                    </View>
+                    <Text style={{ color: "#94a3b8", fontSize: 13, lineHeight: 18 }}>
+                        ⚡ OTA Server: <Text style={{ color: "#38bdf8" }}>Supabase Edge Functions</Text>{"\n"}
+                        ⚡ Live Bundle Fallback: <Text style={{ color: "#38bdf8" }}>OnAirUpdateScreen (Animated Progress)</Text>{"\n"}
+                        ⚡ Bundle ID: <Text style={{ color: "#e2e8f0" }}>{installedAppInfo.bundleId}</Text>
+                    </Text>
+                    <Text style={styles.helperText}>
+                        💡 When deploying JS/UI updates via HotUpdater CLI, users automatically see the branded OnAirUpdateScreen while the bundle downloads and auto-reloads.
+                    </Text>
+                </View>
+
+                {/* ACTIONS */}
+                <TouchableOpacity
+                    style={[styles.saveQuizBtn, { backgroundColor: "#2563eb" }]}
+                    onPress={handleSaveVersionConfig}
+                    disabled={versionSaving}
+                >
+                    {versionSaving ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                        <Text style={styles.saveQuizBtnText}>💾 Publish Version Rules to Firebase</Text>
+                    )}
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.resetQuizBtn} onPress={handleResetVersionDefaults}>
+                    <Text style={styles.resetQuizBtnText}>↺ Reset to Installed Version</Text>
+                </TouchableOpacity>
+
+                <View style={{ height: 40 }} />
+            </ScrollView>
+        );
+    };
+
     return (
         <SafeAreaView edges={['top']} style={styles.container}>
             <View style={styles.header}>
@@ -1354,7 +1689,7 @@ export default function AdminPanelScreen({ navigation }) {
                     showsHorizontalScrollIndicator={false}
                     contentContainerStyle={styles.tabBarScroll}
                 >
-                    {["Pending", "Paid", "Users", "Messages", "Chats", "Quiz"].map((tab) => (
+                    {["Pending", "Paid", "Users", "Messages", "Chats", "Quiz", "Version"].map((tab) => (
                         <TouchableOpacity
                             key={tab}
                             style={[styles.tab, activeTab === tab && styles.activeTab]}
@@ -1384,6 +1719,8 @@ export default function AdminPanelScreen({ navigation }) {
                 </View>
             ) : activeTab === "Quiz" ? (
                 renderQuizSettings()
+            ) : activeTab === "Version" ? (
+                renderVersionSettings()
             ) : (
                 <FlatList
                     data={data}

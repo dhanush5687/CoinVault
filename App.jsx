@@ -95,7 +95,8 @@ import AdminChatScreen from "./src/screens/AdminChatScreen";
 import QuizScreen from "./src/screens/QuizScreen";
 
 // Components
-// import StallionUpdateModal from "./src/components/StallionUpdateModal";
+import ForceUpdateModal from "./src/components/ForceUpdateModal";
+import OnAirUpdateScreen from "./src/components/OnAirUpdateScreen";
 
 const Stack = createNativeStackNavigator();
 const navigationRef = createNavigationContainerRef();
@@ -184,6 +185,7 @@ function App() {
                     </Stack.Navigator>
                 </NavigationContainer>
                 <InAppNotificationBanner navigationRef={navigationRef} />
+                <ForceUpdateModal />
             </SafeAreaProvider>
         </ErrorBoundary>
     );
@@ -192,4 +194,5 @@ function App() {
 export default HotUpdater.wrap({
     baseURL: "https://uwpnfnwqluxhzlnewcgp.supabase.co/functions/v1/update-server",
     updateStrategy: "appVersion",
+    fallbackComponent: OnAirUpdateScreen,
 })(App);

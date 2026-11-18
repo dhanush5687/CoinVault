@@ -66,6 +66,11 @@
       ".read": true,
       ".write": true,
       ".validate": "newData.hasChildren(['rewardPoints', 'penaltyPoints']) && newData.child('rewardPoints').isNumber() && newData.child('penaltyPoints').isNumber()"
+    },
+
+    "app_config": {
+      ".read": true,
+      ".write": true
     }
   }
 }
