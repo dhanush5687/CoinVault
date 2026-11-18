@@ -50,10 +50,10 @@ export default function HomeScreen({ navigation }) {
             // Show App Open on Focus
             showAppOpenAd();
 
-            // Initial popup ad after 2 seconds
+            // Initial popup ad after 12 seconds to prevent overlapping full-screen ads
             const initialTimer = setTimeout(() => {
                 showInterstitialAd();
-            }, 2000);
+            }, 12000);
 
             // Repeat every 2 minutes
             const interval = setInterval(() => {

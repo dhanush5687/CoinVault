@@ -105,6 +105,10 @@ function App() {
     /* ================= ADMOB & APP STATE ================= */
     useEffect(() => {
         const initAds = async () => {
+            await mobileAds().setRequestConfiguration({
+                // Ensure no test devices are registered so all ad requests are 100% real live production ads
+                testDeviceIdentifiers: [],
+            });
             await mobileAds().initialize();
             preloadRewardedAds(); // preload rewarded ads
             loadAppOpenAd(); // preload app open ads
