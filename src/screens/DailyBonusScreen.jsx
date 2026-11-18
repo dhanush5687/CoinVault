@@ -7,7 +7,6 @@ import {
   Animated,
   Dimensions,
   Alert,
-  ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -18,12 +17,12 @@ import { supabase } from "../config/supabase";
 import { showInterstitialAd } from "../ads/InterstitialAdManager";
 
 const { width } = Dimensions.get("window");
-const WHEEL_SIZE = Math.min(width * 0.74, 300);
+const WHEEL_SIZE = Math.min(width * 0.75, 310);
 
 // 8 Segments on the Wheel
 // Regular max reward: 10 coins
-// Streak Day 3: 100 coins (once per month)
-// Streak Day 7: 500 coins (once per month)
+// Day 3 streak: 100 coins (once per month)
+// Day 7 streak: 500 coins (once per month)
 const SEGMENTS = [10, 2, 100, 4, 8, 500, 5, 3];
 const REGULAR_POOL = [2, 3, 4, 5, 8, 10]; // Maximum 10 coins on normal spins
 
@@ -36,7 +35,7 @@ export default function DailyBonusScreen({ navigation }) {
   const [timer, setTimer] = useState("");
   const [won, setWon] = useState(null);
 
-  // Streak & Month state
+  // Background Streak & Month state (silent under the hood)
   const [streak, setStreak] = useState(1);
   const [claimed100ThisMonth, setClaimed100ThisMonth] = useState(false);
   const [claimed500ThisMonth, setClaimed500ThisMonth] = useState(false);
@@ -49,7 +48,7 @@ export default function DailyBonusScreen({ navigation }) {
     return () => clearInterval(t);
   }, []);
 
-  /* ================= STREAK & MONTHLY STATUS ================= */
+  /* ================= STREAK & MONTHLY STATUS (UNDER THE HOOD) ================= */
 
   const checkLockAndStreak = async () => {
     try {
@@ -250,8 +249,8 @@ export default function DailyBonusScreen({ navigation }) {
 
       // 5. Log Transaction in Supabase
       let txDesc = "Daily spin bonus reward";
-      if (coinsWon === 100) txDesc = "Day 3 Streak Milestone (+100 Coins)";
-      if (coinsWon === 500) txDesc = "Day 7 Streak Mega Bonus (+500 Coins)";
+      if (coinsWon === 100) txDesc = "Daily Milestone Reward (+100 Coins)";
+      if (coinsWon === 500) txDesc = "Daily Mega Bonus (+500 Coins)";
 
       await supabase
         .from("wallet_transactions")
@@ -277,13 +276,8 @@ export default function DailyBonusScreen({ navigation }) {
 
         let alertTitle = "🎉 Congratulations!";
         let alertMsg = `You won ${coinsWon} coins!`;
-
-        if (coinsWon === 100) {
-          alertTitle = "🎉 3-Day Streak Achieved!";
-          alertMsg = "Awesome! You unlocked the Day 3 Milestone and received 100 Coins (Once this month)!";
-        } else if (coinsWon === 500) {
-          alertTitle = "🏆 7-Day Mega Milestone!";
-          alertMsg = "Incredible dedication! You completed a 7-day streak and won 500 Coins (Once this month)!";
+        if (coinsWon === 500) {
+          alertTitle = "🏆 Mega Jackpot!";
         }
 
         Alert.alert(alertTitle, alertMsg, [
@@ -327,79 +321,8 @@ export default function DailyBonusScreen({ navigation }) {
         <View style={{ width: 36 }} />
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* STREAK & MILESTONES CARD */}
-        <View style={styles.streakCard}>
-          <View style={styles.streakHeader}>
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <Text style={{ fontSize: 18, marginRight: 6 }}>🔥</Text>
-              <Text style={styles.streakTitle}>Daily Streak: Day {streak}</Text>
-            </View>
-            <View style={styles.monthBadge}>
-              <Text style={styles.monthBadgeText}>
-                {new Date().toLocaleString("en-US", { month: "short" })} Rewards
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.milestonesRow}>
-            {/* Day 3 Milestone Box */}
-            <View style={[styles.milestoneBox, claimed100ThisMonth && styles.milestoneBoxClaimed]}>
-              <Text style={styles.milestoneTarget}>Day 3 Bonus</Text>
-              <Text style={[styles.milestoneAmount, { color: "#fbbf24" }]}>🪙 100 Coins</Text>
-              <View
-                style={[
-                  styles.statusBadge,
-                  claimed100ThisMonth
-                    ? styles.statusBadgeClaimed
-                    : streak >= 3 && !locked
-                    ? styles.statusBadgeReady
-                    : styles.statusBadgePending,
-                ]}
-              >
-                <Text style={styles.statusBadgeText}>
-                  {claimed100ThisMonth
-                    ? "✓ Claimed"
-                    : streak >= 3 && !locked
-                    ? "✨ Ready Now!"
-                    : `${Math.min(streak, 3)}/3 Days`}
-                </Text>
-              </View>
-            </View>
-
-            {/* Day 7 Milestone Box */}
-            <View style={[styles.milestoneBox, claimed500ThisMonth && styles.milestoneBoxClaimed]}>
-              <Text style={styles.milestoneTarget}>Day 7 Mega Bonus</Text>
-              <Text style={[styles.milestoneAmount, { color: "#38bdf8" }]}>🪙 500 Coins</Text>
-              <View
-                style={[
-                  styles.statusBadge,
-                  claimed500ThisMonth
-                    ? styles.statusBadgeClaimed
-                    : streak >= 7 && !locked
-                    ? styles.statusBadgeReady
-                    : styles.statusBadgePending,
-                ]}
-              >
-                <Text style={styles.statusBadgeText}>
-                  {claimed500ThisMonth
-                    ? "✓ Claimed"
-                    : streak >= 7 && !locked
-                    ? "🏆 Ready Now!"
-                    : `${Math.min(streak, 7)}/7 Days`}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          <Text style={styles.streakRuleNotice}>
-            💡 Regular spins give max 10 coins. Spin daily 3 days for 100 coins & 7 days for 500 coins (once each per month).
-          </Text>
-        </View>
-
+      {/* CENTER CONTENT */}
+      <View style={styles.mainContent}>
         {/* WHEEL ASSEMBLY */}
         <View style={styles.wheelAssembly}>
           {/* POINTER */}
@@ -410,8 +333,6 @@ export default function DailyBonusScreen({ navigation }) {
             {SEGMENTS.map((value, i) => {
               const is100 = value === 100;
               const is500 = value === 500;
-              const isGold = is100;
-              const isDiamond = is500;
 
               return (
                 <View
@@ -429,8 +350,8 @@ export default function DailyBonusScreen({ navigation }) {
                   <Text
                     style={[
                       styles.segmentText,
-                      isGold && { color: "#fbbf24", fontWeight: "900", fontSize: 16 },
-                      isDiamond && { color: "#38bdf8", fontWeight: "900", fontSize: 16 },
+                      is100 && { color: "#fbbf24", fontWeight: "900", fontSize: 16 },
+                      is500 && { color: "#38bdf8", fontWeight: "900", fontSize: 16 },
                     ]}
                   >
                     {value}
@@ -474,7 +395,7 @@ export default function DailyBonusScreen({ navigation }) {
             <Text style={styles.winText}>+{won} 🪙</Text>
           </Animated.View>
         )}
-      </ScrollView>
+      </View>
 
       {/* BANNER AD (BOTTOM SAFE ZONE) */}
       <View style={styles.adContainer}>
@@ -497,7 +418,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 12,
     backgroundColor: "#020617",
   },
 
@@ -513,117 +434,11 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
 
-  scrollContent: {
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 90,
-  },
-
-  streakCard: {
-    width: "100%",
-    backgroundColor: "#111827",
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#1e293b",
-    marginBottom: 20,
-  },
-
-  streakHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-
-  streakTitle: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "bold",
-  },
-
-  monthBadge: {
-    backgroundColor: "#1e293b",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: "#334155",
-  },
-
-  monthBadgeText: {
-    color: "#94a3b8",
-    fontSize: 11,
-    fontWeight: "600",
-  },
-
-  milestonesRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 8,
-  },
-
-  milestoneBox: {
+  mainContent: {
     flex: 1,
-    backgroundColor: "#0f172a",
-    padding: 10,
-    borderRadius: 10,
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#334155",
-  },
-
-  milestoneBoxClaimed: {
-    borderColor: "#10b981",
-    backgroundColor: "rgba(16, 185, 129, 0.08)",
-  },
-
-  milestoneTarget: {
-    color: "#94a3b8",
-    fontSize: 11,
-    fontWeight: "600",
-  },
-
-  milestoneAmount: {
-    fontSize: 14,
-    fontWeight: "bold",
-    marginVertical: 3,
-  },
-
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
-    marginTop: 2,
-  },
-
-  statusBadgeClaimed: {
-    backgroundColor: "rgba(16, 185, 129, 0.2)",
-  },
-
-  statusBadgeReady: {
-    backgroundColor: "rgba(245, 158, 11, 0.25)",
-    borderWidth: 1,
-    borderColor: "#f59e0b",
-  },
-
-  statusBadgePending: {
-    backgroundColor: "#1e293b",
-  },
-
-  statusBadgeText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "700",
-  },
-
-  streakRuleNotice: {
-    color: "#64748b",
-    fontSize: 11,
-    marginTop: 6,
-    lineHeight: 16,
-    textAlign: "center",
+    justifyContent: "center",
+    paddingBottom: 70,
   },
 
   wheelAssembly: {
@@ -631,7 +446,7 @@ const styles = StyleSheet.create({
     height: WHEEL_SIZE,
     alignItems: "center",
     justifyContent: "center",
-    marginVertical: 10,
+    marginVertical: 15,
   },
 
   pointer: {
@@ -692,10 +507,10 @@ const styles = StyleSheet.create({
   timerWrap: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 18,
+    marginTop: 22,
     backgroundColor: "#1e293b",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: "#334155",
@@ -709,7 +524,7 @@ const styles = StyleSheet.create({
 
   winBox: {
     position: "absolute",
-    top: "55%",
+    top: "52%",
     backgroundColor: "#22c55e",
     paddingHorizontal: 30,
     paddingVertical: 14,
