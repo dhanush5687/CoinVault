@@ -1,6 +1,3 @@
-
-
-
 import React, { useRef, useState, useEffect } from "react";
 import {
   View,
@@ -10,48 +7,25 @@ import {
   Animated,
   Dimensions,
   Alert,
-  Platform,
-  StatusBar,
+  ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Image } from "react-native";
 import { fakeBack } from "../components/FackBack";
-
-// ✅ ADMOB
-import {
-  BannerAd,
-  BannerAdSize,
-
-} from "react-native-google-mobile-ads";
-import {
-  ADMOB_BANNER_ID,
-
-} from "@env";
 import AdmobBannerCard from "../components/AdmobBannerCard";
-
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
-
-const { width } = Dimensions.get("window");
-const WHEEL_SIZE = width * 0.75;
-
-const SEGMENTS = [10, 20, 30, 50, 10, 100, 500];
-
-// weighted rewards
-const WEIGHTED_POOL = [
-  10, 10, 10,
-  20, 20,
-  30, 30,
-  50,
-  100,
-  500,
-];
-
-// Live Ad Unit ID
-const BANNER_ID = ADMOB_BANNER_ID || "ca-app-pub-2490251867268823/5116361111";
-
 import { supabase } from "../config/supabase";
 import { showInterstitialAd } from "../ads/InterstitialAdManager";
+
+const { width } = Dimensions.get("window");
+const WHEEL_SIZE = Math.min(width * 0.74, 300);
+
+// 8 Segments on the Wheel
+// Regular max reward: 10 coins
+// Streak Day 3: 100 coins (once per month)
+// Streak Day 7: 500 coins (once per month)
+const SEGMENTS = [10, 2, 100, 4, 8, 500, 5, 3];
+const REGULAR_POOL = [2, 3, 4, 5, 8, 10]; // Maximum 10 coins on normal spins
 
 export default function DailyBonusScreen({ navigation }) {
   const rotateAnim = useRef(new Animated.Value(0)).current;
@@ -62,65 +36,113 @@ export default function DailyBonusScreen({ navigation }) {
   const [timer, setTimer] = useState("");
   const [won, setWon] = useState(null);
 
+  // Streak & Month state
+  const [streak, setStreak] = useState(1);
+  const [claimed100ThisMonth, setClaimed100ThisMonth] = useState(false);
+  const [claimed500ThisMonth, setClaimed500ThisMonth] = useState(false);
+
+  const currentMonthKey = new Date().toISOString().slice(0, 7); // e.g. "2026-11"
+
   useEffect(() => {
-    checkLock();
-    const t = setInterval(checkLock, 1000);
+    checkLockAndStreak();
+    const t = setInterval(checkLockAndStreak, 1000);
     return () => clearInterval(t);
   }, []);
 
-  /* ================= DAILY LOCK (F-07 Anti-Tampering) ================= */
+  /* ================= STREAK & MONTHLY STATUS ================= */
 
-  const checkLock = async () => {
+  const checkLockAndStreak = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      const now = Date.now();
       let serverSpinTime = 0;
-      // Check last claim from Supabase (server-authoritative)
-      const { data } = await supabase
-        .from("daily_bonuses")
-        .select("created_at, claimed_at")
-        .eq("user_id", user.id)
-        .order("id", { ascending: false })
-        .limit(1);
 
-      if (data && data.length > 0) {
-        const rawTime = data[0].claimed_at || data[0].created_at;
+      // 1. Authoritative check from Supabase daily_bonuses
+      const { data: bonusList } = await supabase
+        .from("daily_bonuses")
+        .select("created_at, claimed_at, reward_amount")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(35);
+
+      let hasClaimed100 = false;
+      let hasClaimed500 = false;
+
+      if (bonusList && bonusList.length > 0) {
+        const rawTime = bonusList[0].claimed_at || bonusList[0].created_at;
         if (rawTime) {
           serverSpinTime = new Date(rawTime).getTime();
+        }
+
+        // Check if 100 or 500 were already claimed in current month
+        for (const b of bonusList) {
+          const dStr = b.claimed_at || b.created_at || "";
+          if (dStr.startsWith(currentMonthKey)) {
+            if (b.reward_amount === 100) hasClaimed100 = true;
+            if (b.reward_amount === 500) hasClaimed500 = true;
+          }
         }
       }
 
       // Check local storage fallback
-      const AsyncStorage = require("@react-native-async-storage/async-storage").default;
       const localSpinRaw = await AsyncStorage.getItem("LAST_SPIN_TIME");
-      const localSpinTime = localSpinRaw ? parseInt(localSpinRaw) : 0;
+      const localSpinTime = localSpinRaw ? parseInt(localSpinRaw, 10) : 0;
+      const localStreakRaw = await AsyncStorage.getItem("DAILY_SPIN_STREAK");
+      let storedStreak = localStreakRaw ? parseInt(localStreakRaw, 10) : 1;
+
+      const local100Month = await AsyncStorage.getItem(`SPIN_CLAIMED_100_${currentMonthKey}`);
+      const local500Month = await AsyncStorage.getItem(`SPIN_CLAIMED_500_${currentMonthKey}`);
+      if (local100Month === "true") hasClaimed100 = true;
+      if (local500Month === "true") hasClaimed500 = true;
+
+      setClaimed100ThisMonth(hasClaimed100);
+      setClaimed500ThisMonth(hasClaimed500);
 
       const lastSpin = Math.max(serverSpinTime, localSpinTime);
+
       if (!lastSpin || isNaN(lastSpin)) {
+        // First spin ever
         setLocked(false);
         setTimer("");
+        setStreak(1);
         return;
       }
 
-      const now = Date.now();
-      // Detect backward clock manipulation
+      // Clock tampering check
       if (now < lastSpin) {
         setLocked(true);
         setTimer("Clock Desynced");
         return;
       }
 
-      const diff = 86400000 - (now - lastSpin);
+      const timeSinceLastSpin = now - lastSpin;
+      const diff = 86400000 - timeSinceLastSpin; // 24 hours lock
+
       if (diff <= 0) {
+        // Unlocked! Ready to spin
         setLocked(false);
         setTimer("");
+
+        // Calculate upcoming streak
+        if (timeSinceLastSpin <= 48 * 3600000) {
+          // Came back within 48h -> streak increases
+          const upcomingStreak = storedStreak + 1;
+          setStreak(upcomingStreak);
+        } else {
+          // Missed more than 48 hours -> streak resets to 1
+          setStreak(1);
+          await AsyncStorage.setItem("DAILY_SPIN_STREAK", "1").catch(() => {});
+        }
       } else {
+        // Locked
         setLocked(true);
         setTimer(formatTime(diff));
+        setStreak(storedStreak);
       }
     } catch (e) {
-      console.log("Check Lock Error:", e);
+      console.log("Check Lock & Streak Error:", e);
     }
   };
 
@@ -141,53 +163,81 @@ export default function DailyBonusScreen({ navigation }) {
     // Show Ad before spin
     showInterstitialAd();
 
-    const reward =
-      WEIGHTED_POOL[Math.floor(Math.random() * WEIGHTED_POOL.length)];
+    // 🌟 Milestone Reward Decision:
+    // 1. Day 3: 100 Coins (Only once per month)
+    // 2. Day 7: 500 Coins (Only once per month)
+    // 3. Otherwise: Max 10 Coins (from REGULAR_POOL)
+    let reward = 10;
+    let isMilestone100 = false;
+    let isMilestone500 = false;
+
+    if (streak === 3 && !claimed100ThisMonth) {
+      reward = 100;
+      isMilestone100 = true;
+    } else if (streak === 7 && !claimed500ThisMonth) {
+      reward = 500;
+      isMilestone500 = true;
+    } else {
+      // Normal spin: Maximum 10 coins
+      reward = REGULAR_POOL[Math.floor(Math.random() * REGULAR_POOL.length)];
+    }
+
     const index = SEGMENTS.indexOf(reward);
     const angle = 360 / SEGMENTS.length;
 
-    const finalRotation =
-      360 * 6 + (SEGMENTS.length - index) * angle;
+    // Exact clockwise rotation landing under the top pointer
+    const finalRotation = 360 * 6 + (SEGMENTS.length - index) * angle;
 
     Animated.timing(rotateAnim, {
       toValue: finalRotation,
       duration: 4200,
       useNativeDriver: true,
     }).start(async () => {
-      await giveReward(reward);
+      await giveReward(reward, isMilestone100, isMilestone500);
       isSpinningRef.current = false;
-      checkLock();
+      checkLockAndStreak();
     });
   };
 
   /* ================= REWARD ================= */
 
-  const giveReward = async (coinsWon) => {
+  const giveReward = async (coinsWon, isMilestone100, isMilestone500) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
       const nowIso = new Date().toISOString();
-      const AsyncStorage = require("@react-native-async-storage/async-storage").default;
-      await AsyncStorage.setItem("LAST_SPIN_TIME", Date.now().toString()).catch(() => {});
+      const nowMs = Date.now();
 
-      // 🛡️ Atomic Reward via Supabase (F-05)
+      // 1. Save spin timestamp and streak locally
+      await AsyncStorage.setItem("LAST_SPIN_TIME", nowMs.toString()).catch(() => {});
+      await AsyncStorage.setItem("DAILY_SPIN_STREAK", streak.toString()).catch(() => {});
+
+      if (coinsWon === 100) {
+        await AsyncStorage.setItem(`SPIN_CLAIMED_100_${currentMonthKey}`, "true").catch(() => {});
+        setClaimed100ThisMonth(true);
+      } else if (coinsWon === 500) {
+        await AsyncStorage.setItem(`SPIN_CLAIMED_500_${currentMonthKey}`, "true").catch(() => {});
+        setClaimed500ThisMonth(true);
+      }
+
+      // 2. 🛡️ Atomic Reward via Supabase (supports up to 500 coins)
       const { atomicRewardCoins } = require("../services/supabaseService");
       const rewardRes = await atomicRewardCoins(coinsWon, `Daily Bonus Spin (+${coinsWon})`);
       const newBalance = rewardRes.success ? rewardRes.newBalance : coinsWon;
 
-      // Sync to Firebase (for Admin Panel) with transaction
+      // 3. Sync to Firebase (for Admin Panel)
       try {
         const database = require("@react-native-firebase/database").default;
-        await database().ref(`/wallets/${user.id}/balance`).transaction((cur) => {
-          if (cur === null || cur === undefined) return newBalance;
-          return cur + coinsWon;
+        await database().ref(`/wallets/${user.id}`).update({
+          balance: newBalance,
+          lastUpdated: nowMs,
         });
       } catch (fbError) {
         console.warn("Firebase Sync Error:", fbError.message);
       }
 
-      // 3. Log Daily Bonus (Supabase) with both created_at and claimed_at
+      // 4. Log Daily Bonus record in Supabase
       await supabase
         .from("daily_bonuses")
         .insert([{
@@ -195,10 +245,14 @@ export default function DailyBonusScreen({ navigation }) {
           reward_amount: coinsWon,
           spin_result: coinsWon.toString(),
           claimed_at: nowIso,
-          created_at: nowIso
+          created_at: nowIso,
         }]);
 
-      // 4. Log Transaction
+      // 5. Log Transaction in Supabase
+      let txDesc = "Daily spin bonus reward";
+      if (coinsWon === 100) txDesc = "Day 3 Streak Milestone (+100 Coins)";
+      if (coinsWon === 500) txDesc = "Day 7 Streak Mega Bonus (+500 Coins)";
+
       await supabase
         .from("wallet_transactions")
         .insert([{
@@ -206,7 +260,7 @@ export default function DailyBonusScreen({ navigation }) {
           transaction_type: "Daily Reward",
           amount: coinsWon,
           balance_after: newBalance,
-          description: "Daily spin bonus reward"
+          description: txDesc,
         }]);
 
       setWon(coinsWon);
@@ -220,14 +274,25 @@ export default function DailyBonusScreen({ navigation }) {
 
       setTimeout(() => {
         setWon(null);
-        Alert.alert("🎉 Congratulations!", `You won ${coinsWon} coins`, [
+
+        let alertTitle = "🎉 Congratulations!";
+        let alertMsg = `You won ${coinsWon} coins!`;
+
+        if (coinsWon === 100) {
+          alertTitle = "🎉 3-Day Streak Achieved!";
+          alertMsg = "Awesome! You unlocked the Day 3 Milestone and received 100 Coins (Once this month)!";
+        } else if (coinsWon === 500) {
+          alertTitle = "🏆 7-Day Mega Milestone!";
+          alertMsg = "Incredible dedication! You completed a 7-day streak and won 500 Coins (Once this month)!";
+        }
+
+        Alert.alert(alertTitle, alertMsg, [
           {
-            text: "OK",
+            text: "Claim Coins",
             onPress: () => {
-              // Show Ad after claiming
               showInterstitialAd();
-            }
-          }
+            },
+          },
         ]);
       }, 1800);
     } catch (e) {
@@ -243,80 +308,175 @@ export default function DailyBonusScreen({ navigation }) {
   /* ================= UI ================= */
 
   return (
-    <SafeAreaView edges={['top']} style={styles.container}>
-
-      {/* TOP HEADER ROW */}
+    <SafeAreaView edges={["top"]} style={styles.container}>
+      {/* TOP HEADER */}
       <View style={styles.topHeader}>
         <TouchableOpacity
           style={styles.backBtn}
           onPress={() => fakeBack(navigation)}
           activeOpacity={0.7}
         >
-          <MaterialCommunityIcons name="arrow-left" size={28} color="#38bdf8" />
+          <MaterialCommunityIcons name="arrow-left" size={26} color="#38bdf8" />
         </TouchableOpacity>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <MaterialCommunityIcons name="gift" size={26} color="#facc15" style={{ marginRight: 8 }} />
-          <Text style={{ color: "#facc15", fontSize: 20, fontWeight: "800" }}>Daily Spin Bonus</Text>
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          <MaterialCommunityIcons name="gift" size={24} color="#facc15" style={{ marginRight: 6 }} />
+          <Text style={styles.screenTitle}>Daily Spin Bonus</Text>
         </View>
 
-        <View style={{ width: 40 }} />
+        <View style={{ width: 36 }} />
       </View>
 
-      {/* POINTER */}
-      <View style={styles.pointer} />
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* STREAK & MILESTONES CARD */}
+        <View style={styles.streakCard}>
+          <View style={styles.streakHeader}>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <Text style={{ fontSize: 18, marginRight: 6 }}>🔥</Text>
+              <Text style={styles.streakTitle}>Daily Streak: Day {streak}</Text>
+            </View>
+            <View style={styles.monthBadge}>
+              <Text style={styles.monthBadgeText}>
+                {new Date().toLocaleString("en-US", { month: "short" })} Rewards
+              </Text>
+            </View>
+          </View>
 
-      {/* WHEEL */}
-      <Animated.View style={[styles.wheel, { transform: [{ rotate }] }]}>
-        {SEGMENTS.map((value, i) => (
-          <View
-            key={i}
+          <View style={styles.milestonesRow}>
+            {/* Day 3 Milestone Box */}
+            <View style={[styles.milestoneBox, claimed100ThisMonth && styles.milestoneBoxClaimed]}>
+              <Text style={styles.milestoneTarget}>Day 3 Bonus</Text>
+              <Text style={[styles.milestoneAmount, { color: "#fbbf24" }]}>🪙 100 Coins</Text>
+              <View
+                style={[
+                  styles.statusBadge,
+                  claimed100ThisMonth
+                    ? styles.statusBadgeClaimed
+                    : streak >= 3 && !locked
+                    ? styles.statusBadgeReady
+                    : styles.statusBadgePending,
+                ]}
+              >
+                <Text style={styles.statusBadgeText}>
+                  {claimed100ThisMonth
+                    ? "✓ Claimed"
+                    : streak >= 3 && !locked
+                    ? "✨ Ready Now!"
+                    : `${Math.min(streak, 3)}/3 Days`}
+                </Text>
+              </View>
+            </View>
+
+            {/* Day 7 Milestone Box */}
+            <View style={[styles.milestoneBox, claimed500ThisMonth && styles.milestoneBoxClaimed]}>
+              <Text style={styles.milestoneTarget}>Day 7 Mega Bonus</Text>
+              <Text style={[styles.milestoneAmount, { color: "#38bdf8" }]}>🪙 500 Coins</Text>
+              <View
+                style={[
+                  styles.statusBadge,
+                  claimed500ThisMonth
+                    ? styles.statusBadgeClaimed
+                    : streak >= 7 && !locked
+                    ? styles.statusBadgeReady
+                    : styles.statusBadgePending,
+                ]}
+              >
+                <Text style={styles.statusBadgeText}>
+                  {claimed500ThisMonth
+                    ? "✓ Claimed"
+                    : streak >= 7 && !locked
+                    ? "🏆 Ready Now!"
+                    : `${Math.min(streak, 7)}/7 Days`}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          <Text style={styles.streakRuleNotice}>
+            💡 Regular spins give max 10 coins. Spin daily 3 days for 100 coins & 7 days for 500 coins (once each per month).
+          </Text>
+        </View>
+
+        {/* WHEEL ASSEMBLY */}
+        <View style={styles.wheelAssembly}>
+          {/* POINTER */}
+          <View style={styles.pointer} />
+
+          {/* WHEEL */}
+          <Animated.View style={[styles.wheel, { transform: [{ rotate }] }]}>
+            {SEGMENTS.map((value, i) => {
+              const is100 = value === 100;
+              const is500 = value === 500;
+              const isGold = is100;
+              const isDiamond = is500;
+
+              return (
+                <View
+                  key={i}
+                  style={[
+                    styles.segment,
+                    {
+                      transform: [
+                        { rotate: `${(360 / SEGMENTS.length) * i}deg` },
+                        { translateY: -WHEEL_SIZE / 2 + 28 },
+                      ],
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.segmentText,
+                      isGold && { color: "#fbbf24", fontWeight: "900", fontSize: 16 },
+                      isDiamond && { color: "#38bdf8", fontWeight: "900", fontSize: 16 },
+                    ]}
+                  >
+                    {value}
+                  </Text>
+                </View>
+              );
+            })}
+          </Animated.View>
+
+          {/* CENTER SPIN BUTTON */}
+          <TouchableOpacity
             style={[
-              styles.segment,
-              {
-                transform: [
-                  { rotate: `${(360 / SEGMENTS.length) * i}deg` },
-                  { translateY: -WHEEL_SIZE / 2 + 30 },
-                ],
-              },
+              styles.centerBtn,
+              { backgroundColor: locked ? "#374151" : "#22c55e" },
+            ]}
+            onPress={spinWheel}
+            disabled={locked}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.centerText}>
+              {locked ? "LOCKED" : "SPIN"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {locked && (
+          <View style={styles.timerWrap}>
+            <MaterialCommunityIcons name="clock-outline" size={16} color="#facc15" style={{ marginRight: 5 }} />
+            <Text style={styles.timer}>Next spin unlocks in {timer}</Text>
+          </View>
+        )}
+
+        {/* WIN POPUP ANIMATION */}
+        {won && (
+          <Animated.View
+            style={[
+              styles.winBox,
+              { transform: [{ scale: scaleAnim }] },
             ]}
           >
-            <Text style={styles.segmentText}>{value}</Text>
-          </View>
-        ))}
-      </Animated.View>
+            <Text style={styles.winText}>+{won} 🪙</Text>
+          </Animated.View>
+        )}
+      </ScrollView>
 
-      {/* CENTER BUTTON */}
-      <TouchableOpacity
-        style={[
-          styles.centerBtn,
-          { backgroundColor: locked ? "#374151" : "#22c55e" },
-        ]}
-        onPress={spinWheel}
-        disabled={locked}
-      >
-        <Text style={styles.centerText}>
-          {locked ? "LOCKED" : "SPIN"}
-        </Text>
-      </TouchableOpacity>
-
-      {locked && (
-        <Text style={styles.timer}>Next spin in {timer}</Text>
-      )}
-
-      {/* WIN POP */}
-      {won && (
-        <Animated.View
-          style={[
-            styles.winBox,
-            { transform: [{ scale: scaleAnim }] },
-          ]}
-        >
-          <Text style={styles.winText}>+{won} 🪙</Text>
-        </Animated.View>
-      )}
-
-      {/* ✅ BANNER AD (BOTTOM SAFE ZONE) */}
+      {/* BANNER AD (BOTTOM SAFE ZONE) */}
       <View style={styles.adContainer}>
         <AdmobBannerCard asCard={false} />
       </View>
@@ -330,20 +490,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#0a0f1f",
-    alignItems: "center",
-    justifyContent: "center",
   },
 
   topHeader: {
-    position: "absolute",
-    top: 12,
-    left: 0,
-    right: 0,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    zIndex: 20,
+    paddingVertical: 10,
+    backgroundColor: "#020617",
   },
 
   backBtn: {
@@ -352,43 +507,157 @@ const styles = StyleSheet.create({
     backgroundColor: "#1e293b",
   },
 
-  backIcon: {
-    width: 26,
-    height: 26,
-    tintColor: "#38bdf8",
+  screenTitle: {
+    color: "#facc15",
+    fontSize: 18,
+    fontWeight: "800",
   },
 
-  title: {
-    position: "absolute",
-    top: 40,
-    color: "#facc15",
-    fontSize: 22,
-    fontWeight: "800",
+  scrollContent: {
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 90,
+  },
+
+  streakCard: {
+    width: "100%",
+    backgroundColor: "#111827",
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#1e293b",
+    marginBottom: 20,
+  },
+
+  streakHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+
+  streakTitle: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "bold",
+  },
+
+  monthBadge: {
+    backgroundColor: "#1e293b",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#334155",
+  },
+
+  monthBadgeText: {
+    color: "#94a3b8",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+
+  milestonesRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 8,
+  },
+
+  milestoneBox: {
+    flex: 1,
+    backgroundColor: "#0f172a",
+    padding: 10,
+    borderRadius: 10,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#334155",
+  },
+
+  milestoneBoxClaimed: {
+    borderColor: "#10b981",
+    backgroundColor: "rgba(16, 185, 129, 0.08)",
+  },
+
+  milestoneTarget: {
+    color: "#94a3b8",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+
+  milestoneAmount: {
+    fontSize: 14,
+    fontWeight: "bold",
+    marginVertical: 3,
+  },
+
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    marginTop: 2,
+  },
+
+  statusBadgeClaimed: {
+    backgroundColor: "rgba(16, 185, 129, 0.2)",
+  },
+
+  statusBadgeReady: {
+    backgroundColor: "rgba(245, 158, 11, 0.25)",
+    borderWidth: 1,
+    borderColor: "#f59e0b",
+  },
+
+  statusBadgePending: {
+    backgroundColor: "#1e293b",
+  },
+
+  statusBadgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+
+  streakRuleNotice: {
+    color: "#64748b",
+    fontSize: 11,
+    marginTop: 6,
+    lineHeight: 16,
+    textAlign: "center",
+  },
+
+  wheelAssembly: {
+    width: WHEEL_SIZE,
+    height: WHEEL_SIZE,
+    alignItems: "center",
+    justifyContent: "center",
+    marginVertical: 10,
   },
 
   pointer: {
     position: "absolute",
-    top: "36%",
+    top: -12,
     width: 0,
     height: 0,
-    borderLeftWidth: 12,
-    borderRightWidth: 12,
-    borderBottomWidth: 22,
+    borderLeftWidth: 14,
+    borderRightWidth: 14,
+    borderTopWidth: 24,
     borderLeftColor: "transparent",
     borderRightColor: "transparent",
-    borderBottomColor: "#ef4444",
-    zIndex: 10,
+    borderTopColor: "#ef4444",
+    zIndex: 30,
   },
 
   wheel: {
     width: WHEEL_SIZE,
     height: WHEEL_SIZE,
     borderRadius: WHEEL_SIZE / 2,
-    borderWidth: 12,
+    borderWidth: 10,
     borderColor: "#22c55e",
     backgroundColor: "#020617",
     justifyContent: "center",
     alignItems: "center",
+    elevation: 8,
   },
 
   segment: {
@@ -405,33 +674,48 @@ const styles = StyleSheet.create({
 
   centerBtn: {
     position: "absolute",
-    width: 90,
-    height: 90,
-    borderRadius: 45,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     justifyContent: "center",
     alignItems: "center",
-    elevation: 8,
+    elevation: 10,
+    zIndex: 25,
   },
 
   centerText: {
     color: "#000",
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "900",
   },
 
+  timerWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 18,
+    backgroundColor: "#1e293b",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#334155",
+  },
+
   timer: {
-    position: "absolute",
-    bottom: 110,
     color: "#facc15",
-    fontSize: 14,
+    fontSize: 13,
+    fontWeight: "600",
   },
 
   winBox: {
     position: "absolute",
+    top: "55%",
     backgroundColor: "#22c55e",
     paddingHorizontal: 30,
     paddingVertical: 14,
     borderRadius: 30,
+    zIndex: 50,
+    elevation: 10,
   },
 
   winText: {
@@ -443,5 +727,7 @@ const styles = StyleSheet.create({
   adContainer: {
     position: "absolute",
     bottom: 0,
+    width: "100%",
+    alignItems: "center",
   },
 });

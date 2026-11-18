@@ -430,7 +430,7 @@ export const isCurrentUserAdmin = async () => {
  */
 export const atomicRewardCoins = async (amount, reason) => {
   try {
-    const safeAmount = Math.min(Math.max(1, parseInt(amount) || 1), 100);
+    const safeAmount = Math.min(Math.max(1, parseInt(amount) || 1), 500);
     // 1. Try Supabase Atomic RPC
     const { data: rpcData, error: rpcErr } = await supabase.rpc('reward_user_coins', {
       p_amount: safeAmount,
