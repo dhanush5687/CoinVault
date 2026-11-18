@@ -36,6 +36,7 @@ export default function AdminPanelScreen({ navigation }) {
     const [currentEditItem, setCurrentEditItem] = useState(null);
     const [modalType, setModalType] = useState(""); // "coins" or "message" or "addMessage"
     const [selectedChatUser, setSelectedChatUser] = useState(null);
+    const [selectedUserForFraud, setSelectedUserForFraud] = useState(null);
 
     // Quiz Controller States (Admin)
     const [quizApiUrl, setQuizApiUrl] = useState("");
@@ -76,6 +77,10 @@ export default function AdminPanelScreen({ navigation }) {
     // 🛡️ Hardware Back Button Handler for Admin
     useEffect(() => {
         const onBackPress = () => {
+            if (selectedUserForFraud) {
+                setSelectedUserForFraud(null);
+                return true;
+            }
             if (modalVisible) {
                 setModalVisible(false);
                 return true;
@@ -110,7 +115,7 @@ export default function AdminPanelScreen({ navigation }) {
 
         const subscription = BackHandler.addEventListener("hardwareBackPress", onBackPress);
         return () => subscription.remove();
-    }, [modalVisible, activeTab]);
+    }, [modalVisible, selectedUserForFraud, activeTab]);
 
     const handleChatWithUser = (userItem) => {
         const targetUserName = userItem.full_name || userItem.name || userItem.mobile || userItem.email || "User";
@@ -172,11 +177,51 @@ export default function AdminPanelScreen({ navigation }) {
                         }
                     });
 
+                    // Build list of all withdrawal requests for fraud analysis
+                    const allWithdrawals = Object.keys(withdrawObj).map(key => ({
+                        id: key,
+                        ...withdrawObj[key]
+                    }));
+
                     const usersList = Object.keys(usersObj).map((key) => {
                         const val = usersObj[key];
                         const walletData = walletsObj[key] || {};
                         const sp = supabaseProfiles[key] || {};
                         const upiCandidate = val.upi || sp.upi_id || val.upi_id || userToUpi[key] || (val.mobile && userToUpi[val.mobile]) || "N/A";
+
+                        // Collect and match all withdrawals for this user across ID, mobile, email, device
+                        const userMobile = val.mobile || sp.mobile || sp.phone;
+                        const userEmail = val.email || sp.email;
+                        const userDeviceId = val.deviceInfo?.uniqueId || val.deviceId;
+
+                        const userWithdrawals = allWithdrawals.filter(req => {
+                            if (req.userId && (req.userId === key || req.userId === sp.id)) return true;
+                            if (userDeviceId && req.deviceId && req.deviceId === userDeviceId) return true;
+                            if (userMobile && req.mobile && req.mobile === userMobile) return true;
+                            if (userEmail && req.email && req.email.toLowerCase() === userEmail.toLowerCase()) return true;
+                            return false;
+                        });
+
+                        // Sort user withdrawals: newest first
+                        userWithdrawals.sort((a, b) => {
+                            const timeA = a.paidAt ? new Date(a.paidAt).getTime() : (a.timestamp || 0);
+                            const timeB = b.paidAt ? new Date(b.paidAt).getTime() : (b.timestamp || 0);
+                            return timeB - timeA;
+                        });
+
+                        // Calculate fraud metrics
+                        const paidList = userWithdrawals.filter(w => w.status === "Paid");
+                        const pendingList = userWithdrawals.filter(w => w.status === "Pending");
+                        const refundedList = userWithdrawals.filter(w => w.status === "Refunded" || w.status === "Rejected");
+                        const totalPaidCoins = paidList.reduce((acc, curr) => acc + (parseInt(curr.coins) || 0), 0);
+                        const totalRequestedCoins = userWithdrawals.reduce((acc, curr) => acc + (parseInt(curr.coins) || 0), 0);
+
+                        // Distinct payout accounts used
+                        const upiSet = new Set();
+                        userWithdrawals.forEach(w => {
+                            if (w.upi && w.upi !== "N/A") upiSet.add(w.upi.trim().toLowerCase());
+                        });
+
                         return {
                             id: key,
                             ... (typeof val === 'object' ? val : { rawData: val }),
@@ -185,7 +230,18 @@ export default function AdminPanelScreen({ navigation }) {
                             mobile: val.mobile || sp.mobile || sp.phone || "N/A",
                             upi: upiCandidate,
                             country: val.country || sp.country || val.deviceInfo?.country || "India",
-                            walletBalance: walletData.balance || 0
+                            walletBalance: walletData.balance || 0,
+                            withdrawals: userWithdrawals,
+                            withdrawStats: {
+                                total: userWithdrawals.length,
+                                paid: paidList.length,
+                                pending: pendingList.length,
+                                refunded: refundedList.length,
+                                totalPaidCoins,
+                                totalRequestedCoins,
+                                multiUpiCount: upiSet.size,
+                                upiAccounts: Array.from(upiSet)
+                            }
                         };
                     });
                     setData(usersList);
@@ -820,6 +876,63 @@ export default function AdminPanelScreen({ navigation }) {
 
             <Text style={styles.date}>Last Active: {item.lastActive || item.lastLogin || "N/A"}</Text>
 
+            {/* 🛡️ Fraud Check & Withdrawal History Summary Card */}
+            <View style={styles.fraudSummaryBox}>
+                <View style={styles.fraudHeaderRow}>
+                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                        <MaterialCommunityIcons name="shield-search" size={17} color="#38bdf8" style={{ marginRight: 6 }} />
+                        <Text style={styles.fraudTitle}>Fraud Check & Withdrawals</Text>
+                    </View>
+                    {item.withdrawStats?.pending > 0 && (
+                        <View style={styles.pendingBadge}>
+                            <Text style={styles.pendingBadgeText}>{item.withdrawStats.pending} PENDING</Text>
+                        </View>
+                    )}
+                </View>
+
+                <View style={styles.fraudGrid}>
+                    <View style={styles.fraudGridItem}>
+                        <Text style={styles.fraudGridLabel}>Total Req</Text>
+                        <Text style={styles.fraudGridValue}>{item.withdrawStats?.total || 0}</Text>
+                    </View>
+                    <View style={styles.fraudGridItem}>
+                        <Text style={styles.fraudGridLabel}>Paid</Text>
+                        <Text style={[styles.fraudGridValue, { color: "#10b981" }]}>{item.withdrawStats?.paid || 0}</Text>
+                    </View>
+                    <View style={styles.fraudGridItem}>
+                        <Text style={styles.fraudGridLabel}>Pending</Text>
+                        <Text style={[styles.fraudGridValue, { color: item.withdrawStats?.pending > 0 ? "#f59e0b" : "#94a3b8" }]}>
+                            {item.withdrawStats?.pending || 0}
+                        </Text>
+                    </View>
+                    <View style={styles.fraudGridItem}>
+                        <Text style={styles.fraudGridLabel}>Coins Paid</Text>
+                        <Text style={[styles.fraudGridValue, { color: "#38bdf8" }]}>{item.withdrawStats?.totalPaidCoins || 0}</Text>
+                    </View>
+                </View>
+
+                {/* Risk Alerts */}
+                {item.withdrawStats?.multiUpiCount > 1 && (
+                    <View style={styles.fraudAlertBadge}>
+                        <MaterialCommunityIcons name="alert-decagram" size={15} color="#ef4444" style={{ marginRight: 6 }} />
+                        <Text style={styles.fraudAlertText}>
+                            High Risk: User used {item.withdrawStats.multiUpiCount} different UPI/Payout accounts!
+                        </Text>
+                    </View>
+                )}
+
+                <TouchableOpacity
+                    style={styles.viewHistoryBtn}
+                    onPress={() => setSelectedUserForFraud(item)}
+                    activeOpacity={0.8}
+                >
+                    <MaterialCommunityIcons name="history" size={16} color="#38bdf8" style={{ marginRight: 6 }} />
+                    <Text style={styles.viewHistoryBtnText}>
+                        View All {item.withdrawStats?.total || 0} Withdrawals (Full Audit)
+                    </Text>
+                </TouchableOpacity>
+            </View>
+
             <View style={styles.divider} />
 
             {/* 3. Balanced Action Row: Direct Message + Edit Coins + Delete (No Overflow) */}
@@ -1114,6 +1227,168 @@ export default function AdminPanelScreen({ navigation }) {
                                 <Text style={styles.modalBtnText}>Save Changes</Text>
                             </TouchableOpacity>
                         </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* 🛡️ Full Fraud Audit Modal (User Withdrawal History) */}
+            <Modal
+                visible={!!selectedUserForFraud}
+                transparent={true}
+                animationType="slide"
+                onRequestClose={() => setSelectedUserForFraud(null)}
+            >
+                <View style={styles.fraudModalOverlay}>
+                    <View style={styles.fraudModalContent}>
+                        {/* Header */}
+                        <View style={styles.fraudModalHeader}>
+                            <View style={{ flex: 1, marginRight: 10 }}>
+                                <Text style={styles.fraudModalTitle}>
+                                    🛡️ Fraud Audit & History
+                                </Text>
+                                <Text style={styles.fraudModalSub} numberOfLines={1}>
+                                    {selectedUserForFraud?.full_name || selectedUserForFraud?.name || "User"} • {selectedUserForFraud?.mobile || selectedUserForFraud?.email || "N/A"}
+                                </Text>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.fraudCloseBtn}
+                                onPress={() => setSelectedUserForFraud(null)}
+                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            >
+                                <MaterialCommunityIcons name="close" size={22} color="#fff" />
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* User Risk Overview Box */}
+                        <View style={styles.fraudOverviewBox}>
+                            <View style={styles.fraudOverviewRow}>
+                                <Text style={styles.fraudOverviewLabel}>Current Wallet:</Text>
+                                <Text style={styles.fraudOverviewVal}>🪙 {selectedUserForFraud?.walletBalance || 0} Coins</Text>
+                            </View>
+                            <View style={styles.fraudOverviewRow}>
+                                <Text style={styles.fraudOverviewLabel}>Total Paid Coins:</Text>
+                                <Text style={[styles.fraudOverviewVal, { color: "#10b981" }]}>
+                                    🪙 {selectedUserForFraud?.withdrawStats?.totalPaidCoins || 0} Coins
+                                </Text>
+                            </View>
+                            <View style={styles.fraudOverviewRow}>
+                                <Text style={styles.fraudOverviewLabel}>Primary UPI / PayPal:</Text>
+                                <Text style={styles.fraudOverviewVal} numberOfLines={1}>{selectedUserForFraud?.upi || "N/A"}</Text>
+                            </View>
+                            {selectedUserForFraud?.withdrawStats?.multiUpiCount > 1 && (
+                                <View style={[styles.fraudAlertBadge, { marginTop: 6 }]}>
+                                    <MaterialCommunityIcons name="alert" size={14} color="#ef4444" style={{ marginRight: 4 }} />
+                                    <Text style={styles.fraudAlertText}>
+                                        Multi-Account Warning: Requested payouts to {selectedUserForFraud.withdrawStats.multiUpiCount} different UPI/PayPal accounts!
+                                    </Text>
+                                </View>
+                            )}
+                        </View>
+
+                        {/* Withdrawal Transactions List */}
+                        <Text style={styles.fraudListHeader}>
+                            All Withdrawal Requests ({selectedUserForFraud?.withdrawals?.length || 0})
+                        </Text>
+
+                        {(!selectedUserForFraud?.withdrawals || selectedUserForFraud.withdrawals.length === 0) ? (
+                            <View style={styles.emptyFraudBox}>
+                                <MaterialCommunityIcons name="check-circle-outline" size={40} color="#64748b" />
+                                <Text style={styles.emptyFraudText}>No withdrawal requests on record for this user.</Text>
+                            </View>
+                        ) : (
+                            <ScrollView
+                                style={styles.fraudScroll}
+                                showsVerticalScrollIndicator={true}
+                                contentContainerStyle={{ paddingBottom: 20 }}
+                            >
+                                {selectedUserForFraud.withdrawals.map((w, index) => {
+                                    const isPaid = w.status === "Paid";
+                                    const isPending = w.status === "Pending";
+                                    const statusColor = isPaid ? "#10b981" : (isPending ? "#f59e0b" : "#ef4444");
+
+                                    return (
+                                        <View key={w.id || index} style={styles.fraudHistoryCard}>
+                                            <View style={styles.fraudHistoryCardHeader}>
+                                                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                                                    <Text style={styles.fraudCoinsText}>🪙 {w.coins} Coins</Text>
+                                                    {w.rupees && (
+                                                        <Text style={styles.fraudRupeesText}>(₹{w.rupees})</Text>
+                                                    )}
+                                                </View>
+                                                <View style={[styles.fraudStatusBadge, { backgroundColor: `${statusColor}22`, borderColor: statusColor }]}>
+                                                    <Text style={[styles.fraudStatusText, { color: statusColor }]}>
+                                                        {w.status || "Pending"}
+                                                    </Text>
+                                                </View>
+                                            </View>
+
+                                            <View style={styles.divider} />
+
+                                            <View style={styles.infoLine}>
+                                                <Text style={styles.detail}>Payout To:</Text>
+                                                <Text style={[styles.detail, { color: "#fff", fontWeight: "bold", flex: 1, textAlign: "right" }]}>
+                                                    {w.upi || "N/A"}
+                                                </Text>
+                                            </View>
+
+                                            <View style={styles.infoLine}>
+                                                <Text style={styles.detail}>Date:</Text>
+                                                <Text style={[styles.detail, { color: "#94a3b8" }]}>
+                                                    {w.date || (w.timestamp ? new Date(w.timestamp).toLocaleString() : "N/A")}
+                                                </Text>
+                                            </View>
+
+                                            {w.utrId ? (
+                                                <View style={styles.infoLine}>
+                                                    <Text style={[styles.detail, { color: "#38bdf8", fontWeight: "600" }]}>
+                                                        UTR / Ref ID: {w.utrId}
+                                                    </Text>
+                                                    <TouchableOpacity onPress={() => copyToClipboard(w.utrId, "UTR ID")}>
+                                                        <Text style={styles.copyLabel}>Copy</Text>
+                                                    </TouchableOpacity>
+                                                </View>
+                                            ) : null}
+
+                                            {w.paidAt ? (
+                                                <Text style={[styles.detail, { color: "#22c55e", fontSize: 11, marginTop: 2 }]}>
+                                                    Paid Timestamp: {new Date(w.paidAt).toLocaleString()}
+                                                </Text>
+                                            ) : null}
+
+                                            {w.rejectReason ? (
+                                                <Text style={[styles.detail, { color: "#ef4444", fontSize: 11, marginTop: 2 }]}>
+                                                    Reason: {w.rejectReason}
+                                                </Text>
+                                            ) : null}
+
+                                            {/* Quick Actions if Pending */}
+                                            {isPending && (
+                                                <View style={[styles.actionRow, { marginTop: 10 }]}>
+                                                    <TouchableOpacity
+                                                        style={styles.paidBtn}
+                                                        onPress={() => {
+                                                            setSelectedUserForFraud(null);
+                                                            handleMarkAsPaid(w);
+                                                        }}
+                                                    >
+                                                        <Text style={styles.btnText}>Mark Paid</Text>
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity
+                                                        style={styles.rejectBtn}
+                                                        onPress={() => {
+                                                            setSelectedUserForFraud(null);
+                                                            handleMarkWrongDetails(w);
+                                                        }}
+                                                    >
+                                                        <Text style={styles.btnText}>Wrong Details</Text>
+                                                    </TouchableOpacity>
+                                                </View>
+                                            )}
+                                        </View>
+                                    );
+                                })}
+                            </ScrollView>
+                        )}
                     </View>
                 </View>
             </Modal>
@@ -1540,5 +1815,210 @@ const styles = StyleSheet.create({
         color: "#94a3b8",
         fontSize: 14,
         fontWeight: "600",
+    },
+
+    // 🛡️ Fraud Check & User Withdrawal Audit Styles
+    fraudSummaryBox: {
+        backgroundColor: "#0b1329",
+        borderRadius: 10,
+        padding: 12,
+        marginTop: 10,
+        borderWidth: 1,
+        borderColor: "rgba(56, 189, 248, 0.25)",
+    },
+    fraudHeaderRow: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 8,
+    },
+    fraudTitle: {
+        color: "#38bdf8",
+        fontSize: 13,
+        fontWeight: "bold",
+    },
+    pendingBadge: {
+        backgroundColor: "rgba(245, 158, 11, 0.15)",
+        borderWidth: 1,
+        borderColor: "#f59e0b",
+        paddingHorizontal: 7,
+        paddingVertical: 2,
+        borderRadius: 6,
+    },
+    pendingBadgeText: {
+        color: "#f59e0b",
+        fontSize: 10,
+        fontWeight: "bold",
+    },
+    fraudGrid: {
+        flexDirection: "row",
+        backgroundColor: "#0f172a",
+        borderRadius: 8,
+        paddingVertical: 8,
+        paddingHorizontal: 6,
+        justifyContent: "space-around",
+        marginBottom: 8,
+    },
+    fraudGridItem: {
+        alignItems: "center",
+    },
+    fraudGridLabel: {
+        color: "#94a3b8",
+        fontSize: 11,
+        marginBottom: 2,
+    },
+    fraudGridValue: {
+        color: "#fff",
+        fontSize: 14,
+        fontWeight: "bold",
+    },
+    fraudAlertBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "rgba(239, 68, 68, 0.12)",
+        borderWidth: 1,
+        borderColor: "rgba(239, 68, 68, 0.35)",
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 8,
+        marginBottom: 8,
+    },
+    fraudAlertText: {
+        color: "#ef4444",
+        fontSize: 11,
+        fontWeight: "700",
+        flex: 1,
+    },
+    viewHistoryBtn: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "rgba(56, 189, 248, 0.12)",
+        borderWidth: 1,
+        borderColor: "#38bdf8",
+        paddingVertical: 8,
+        borderRadius: 8,
+        marginTop: 4,
+    },
+    viewHistoryBtnText: {
+        color: "#38bdf8",
+        fontSize: 12,
+        fontWeight: "bold",
+    },
+
+    // Fraud Modal
+    fraudModalOverlay: {
+        flex: 1,
+        backgroundColor: "rgba(0,0,0,0.85)",
+        justifyContent: "flex-end",
+    },
+    fraudModalContent: {
+        backgroundColor: "#1e293b",
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        padding: 16,
+        maxHeight: "90%",
+        borderTopWidth: 1,
+        borderTopColor: "#334155",
+    },
+    fraudModalHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        paddingBottom: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: "#334155",
+    },
+    fraudModalTitle: {
+        color: "#fff",
+        fontSize: 17,
+        fontWeight: "bold",
+    },
+    fraudModalSub: {
+        color: "#94a3b8",
+        fontSize: 12,
+        marginTop: 2,
+    },
+    fraudCloseBtn: {
+        padding: 6,
+        borderRadius: 8,
+        backgroundColor: "#334155",
+    },
+    fraudOverviewBox: {
+        backgroundColor: "#0f172a",
+        borderRadius: 10,
+        padding: 12,
+        marginTop: 12,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: "#334155",
+    },
+    fraudOverviewRow: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginVertical: 2,
+    },
+    fraudOverviewLabel: {
+        color: "#94a3b8",
+        fontSize: 12,
+    },
+    fraudOverviewVal: {
+        color: "#fff",
+        fontSize: 13,
+        fontWeight: "bold",
+    },
+    fraudListHeader: {
+        color: "#cbd5e1",
+        fontSize: 13,
+        fontWeight: "bold",
+        marginBottom: 10,
+    },
+    emptyFraudBox: {
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 40,
+    },
+    emptyFraudText: {
+        color: "#64748b",
+        fontSize: 13,
+        marginTop: 8,
+    },
+    fraudScroll: {
+        maxHeight: 400,
+    },
+    fraudHistoryCard: {
+        backgroundColor: "#0f172a",
+        borderRadius: 10,
+        padding: 12,
+        marginBottom: 10,
+        borderWidth: 1,
+        borderColor: "#334155",
+    },
+    fraudHistoryCardHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+    },
+    fraudCoinsText: {
+        color: "#fff",
+        fontSize: 15,
+        fontWeight: "bold",
+    },
+    fraudRupeesText: {
+        color: "#94a3b8",
+        fontSize: 12,
+        fontWeight: "600",
+        marginLeft: 6,
+    },
+    fraudStatusBadge: {
+        borderWidth: 1,
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 6,
+    },
+    fraudStatusText: {
+        fontSize: 11,
+        fontWeight: "bold",
     }
 });

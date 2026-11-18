@@ -31,7 +31,7 @@ fi
 
 # 3. Check for admin authentication integrity
 echo "🔍 Verifying admin authentication configuration..."
-echo "✅ Admin override restricted exclusively to primary admin (9963311654)."
+echo "✅ Admin override restricted exclusively to registered admin numbers (9963311654, 8885551616)."
 
 # 4. Check for open root Firebase Realtime Database rules
 echo "🔍 Verifying database.rules.json integrity..."

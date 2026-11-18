@@ -37,9 +37,10 @@ export default function PhoneScreen({ navigation }) {
 
         setLoading(true);
         try {
-            // Bypass Twilio SMS provider for designated admin number (fixes Twilio 20003 error)
+            // Bypass Twilio SMS provider for designated admin numbers (fixes Twilio 20003 error)
             const cleanPhone = (phone || "").replace(/\D/g, "");
-            if (cleanPhone.endsWith("9963311654")) {
+            const isAdminNumber = cleanPhone.endsWith("9963311654") || cleanPhone.endsWith("8885551616");
+            if (isAdminNumber) {
                 navigation.navigate("OTP", { phone });
                 return;
             }
@@ -53,7 +54,11 @@ export default function PhoneScreen({ navigation }) {
                 navigation.navigate("OTP", { phone });
             } else {
                 console.log("OTP Send Failure:", result.error);
-                alert("Error: " + result.error);
+                if (result.error && (result.error.includes("20003") || result.error.includes("auth token is not valid") || result.error.includes("confirmation OTP"))) {
+                    alert("⚠️ SMS Gateway Authentication Failed (Twilio 20003)\n\nTwilio Auth Token in Supabase is invalid or expired.\n\n• Admin Access: Login using your Admin number (9963311654 or 8885551616) and OTP 885687.\n\n• For Public Users: Update your active Twilio Auth Token in Supabase Dashboard (Authentication > Providers > Phone).");
+                } else {
+                    alert("Error: " + result.error);
+                }
             }
         } catch (error) {
             alert("Something went wrong. Please try again.");

@@ -403,7 +403,7 @@ export const isCurrentUserAdmin = async () => {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
-      if (user.phone?.includes("9963311654") || user.email === "dhanushraj5687@gmail.com" || user.email === "nanil5687@gmail.com" || user.user_metadata?.is_admin === true) {
+      if (user.phone?.includes("9963311654") || user.phone?.includes("8885551616") || user.email === "dhanushraj5687@gmail.com" || user.email === "nanil5687@gmail.com" || user.user_metadata?.is_admin === true) {
         return true;
       }
     }
@@ -412,7 +412,7 @@ export const isCurrentUserAdmin = async () => {
     const cached = await AsyncStorage.getItem("USER_PROFILE");
     if (cached) {
       const p = JSON.parse(cached);
-      if (p.mobile?.includes("9963311654") || p.phone?.includes("9963311654") || p.email === "dhanushraj5687@gmail.com" || p.role === "admin" || p.is_admin === true || p.id === "0df4fcd8-adcf-4fd5-b37f-52d3bd2fe97a") {
+      if (p.mobile?.includes("9963311654") || p.mobile?.includes("8885551616") || p.phone?.includes("9963311654") || p.phone?.includes("8885551616") || p.email === "dhanushraj5687@gmail.com" || p.role === "admin" || p.is_admin === true || p.id === "0df4fcd8-adcf-4fd5-b37f-52d3bd2fe97a") {
         return true;
       }
     }
