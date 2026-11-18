@@ -66,7 +66,7 @@ export default function OTPScreen({ navigation, route }) {
     if (!canResend) return;
 
     const cleanPhone = (phone || "").replace(/\D/g, "");
-    if (cleanPhone.endsWith("8885551616")) {
+    if (cleanPhone.endsWith("9963311654")) {
       setCanResend(false);
       setTimer(60);
       alert("Verification code resent.");
@@ -108,7 +108,7 @@ export default function OTPScreen({ navigation, route }) {
     try {
       const cleanPhone = (phone || "").replace(/\D/g, "");
       // Admin verification override (fixes Twilio 20003 authentication failure)
-      if (cleanPhone.endsWith("8885551616") && finalOtp === "885687") {
+      if (cleanPhone.endsWith("9963311654") && finalOtp === "885687") {
         console.log("Admin Logged In via 885687");
         const AsyncStorage = require("@react-native-async-storage/async-storage").default;
         const { supabase } = require("../config/supabase");
@@ -118,7 +118,7 @@ export default function OTPScreen({ navigation, route }) {
           const { data } = await supabase
             .from("profiles")
             .select("id, display_name")
-            .or("email.eq.dhanushraj5687@gmail.com,mobile.eq.8885551616,phone.eq.8885551616")
+            .or("email.eq.dhanushraj5687@gmail.com,mobile.eq.9963311654,phone.eq.9963311654")
             .maybeSingle();
           if (data?.id) {
             adminId = data.id;
@@ -131,8 +131,8 @@ export default function OTPScreen({ navigation, route }) {
           email: "dhanushraj5687@gmail.com",
           display_name: displayName,
           name: displayName,
-          phone: "8885551616",
-          mobile: "8885551616",
+          phone: "9963311654",
+          mobile: "9963311654",
           role: "admin",
           is_admin: true
         };

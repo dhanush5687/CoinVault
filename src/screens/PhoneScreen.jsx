@@ -39,7 +39,7 @@ export default function PhoneScreen({ navigation }) {
         try {
             // Bypass Twilio SMS provider for designated admin number (fixes Twilio 20003 error)
             const cleanPhone = (phone || "").replace(/\D/g, "");
-            if (cleanPhone.endsWith("8885551616")) {
+            if (cleanPhone.endsWith("9963311654")) {
                 navigation.navigate("OTP", { phone });
                 return;
             }
