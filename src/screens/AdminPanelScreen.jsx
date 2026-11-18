@@ -348,6 +348,7 @@ export default function AdminPanelScreen({ navigation }) {
                             mobile: val.mobile || sp.mobile || sp.phone || "N/A",
                             upi: upiCandidate,
                             country: val.country || sp.country || val.deviceInfo?.country || "India",
+                            deviceInfo: val.deviceInfo || sp.device_info || sp.deviceInfo || null,
                             walletBalance: currentBalance,
                             withdrawals: userWithdrawals,
                             withdrawStats: {
@@ -928,157 +929,249 @@ export default function AdminPanelScreen({ navigation }) {
         </View>
     );
 
-    const renderUserItem = ({ item }) => {
-        const stats = item.coinStats || {};
-        const withdraw = item.withdrawStats || {};
-
-        return (
-            <View style={styles.cleanUserCard}>
-                {/* 1. Header Row: Avatar + Name/Phone + Balance Pill */}
-                <View style={styles.cleanHeaderRow}>
-                    <TouchableOpacity
-                        style={styles.cleanUserMain}
-                        activeOpacity={0.7}
-                        onPress={() => handleChatWithUser(item)}
-                    >
-                        <View style={styles.avatarContainer}>
-                            {item.image ? (
-                                <Image source={{ uri: item.image }} style={styles.avatar} />
-                            ) : (
-                                <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                                    <Text style={styles.avatarInitials}>
-                                        {((item.full_name || item.name || item.email || "U")[0] || "U").toUpperCase()}
-                                    </Text>
-                                </View>
-                            )}
-                            <View style={[styles.statusDot, { backgroundColor: getStatusColor(item.lastActive || item.lastLogin) }]} />
-                        </View>
-                        <View style={{ flex: 1, marginRight: 8 }}>
-                            <Text style={styles.cleanUserName} numberOfLines={1}>
-                                {item.full_name || item.name || "No Name"}
-                            </Text>
-                            <Text style={styles.cleanUserSub} numberOfLines={1}>
-                                {item.mobile !== "N/A" ? item.mobile : item.email}
-                            </Text>
-                        </View>
-                    </TouchableOpacity>
-
-                    {/* Balance Button */}
-                    <TouchableOpacity
-                        style={styles.cleanBalancePill}
-                        activeOpacity={0.8}
-                        onPress={() => handleOpenModal("coins", "Edit Coins", item.walletBalance, item)}
-                    >
-                        <Text style={styles.cleanBalanceLabel}>BALANCE</Text>
-                        <Text style={styles.cleanBalanceValue}>🪙 {item.walletBalance || 0}</Text>
-                    </TouchableOpacity>
-                </View>
-
-                {/* 2. Sleek Financial Metrics Bar (Matched: Earned = Balance + Withdrawn) */}
-                <View style={styles.cleanFinRow}>
-                    <View style={styles.cleanFinCol}>
-                        <Text style={styles.cleanFinLabel}>Total Earned</Text>
-                        <Text style={[styles.cleanFinVal, { color: "#10b981" }]}>
-                            🪙 {stats.totalEarnedCoins || 0}
-                        </Text>
-                    </View>
-
-                    <View style={styles.cleanFinDivider} />
-
-                    <View style={styles.cleanFinCol}>
-                        <Text style={styles.cleanFinLabel}>📺 Watch Ads</Text>
-                        <Text style={[styles.cleanFinVal, { color: "#38bdf8" }]}>
-                            {stats.watchCoins || 0} <Text style={styles.cleanFinCount}>({stats.watchCount || 0} ads)</Text>
-                        </Text>
-                    </View>
-
-                    <View style={styles.cleanFinDivider} />
-
-                    <View style={styles.cleanFinCol}>
-                        <Text style={styles.cleanFinLabel}>💸 Withdrawn</Text>
-                        <Text style={[styles.cleanFinVal, { color: withdraw.paid > 0 ? "#22c55e" : "#94a3b8" }]}>
-                            {withdraw.totalPaidCoins || 0}
-                        </Text>
-                    </View>
-                </View>
-
-                {/* 3. Alerts (Pending withdrawal or high-risk multi-UPI) */}
-                {withdraw.pending > 0 && (
-                    <View style={styles.cleanPendingNotice}>
-                        <MaterialCommunityIcons name="clock-outline" size={13} color="#f59e0b" style={{ marginRight: 4 }} />
-                        <Text style={styles.cleanPendingNoticeText}>
-                            {withdraw.pending} Pending Withdrawal ({stats.totalPendingCoins || 0} Coins)
-                        </Text>
-                    </View>
-                )}
-
-                {withdraw.multiUpiCount > 1 && (
-                    <View style={styles.cleanRiskNotice}>
-                        <MaterialCommunityIcons name="alert" size={13} color="#ef4444" style={{ marginRight: 4 }} />
-                        <Text style={styles.cleanRiskNoticeText}>
-                            High Risk: {withdraw.multiUpiCount} different payout accounts used
-                        </Text>
-                    </View>
-                )}
-
-                {/* 4. Payment address & ID */}
-                <View style={styles.cleanMetaRow}>
-                    <TouchableOpacity
-                        style={styles.cleanMetaItem}
-                        onPress={() => item.upi && item.upi !== "N/A" && copyToClipboard(item.upi, "Payout ID")}
-                    >
-                        <Text style={styles.cleanMetaLabel}>Payout:</Text>
-                        <Text style={styles.cleanMetaVal} numberOfLines={1}>{item.upi || "N/A"}</Text>
-                        {item.upi && item.upi !== "N/A" && (
-                            <Text style={styles.cleanCopyHint}>Copy</Text>
+    const renderUserItem = ({ item }) => (
+        <View style={styles.card}>
+            {/* 1. Header: Left Avatar + Name/Email (flex: 1), Right: Clean Balance Badge */}
+            <View style={styles.cardRow}>
+                <TouchableOpacity
+                    style={styles.userInfoMinimal}
+                    activeOpacity={0.7}
+                    onPress={() => handleChatWithUser(item)}
+                >
+                    <View style={styles.avatarContainer}>
+                        {item.image ? (
+                            <Image source={{ uri: item.image }} style={styles.avatar} />
+                        ) : (
+                            <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                                <Text style={styles.avatarInitials}>
+                                    {((item.full_name || item.name || item.email || "U")[0] || "U").toUpperCase()}
+                                </Text>
+                            </View>
                         )}
-                    </TouchableOpacity>
+                        <View style={[styles.statusDot, { backgroundColor: getStatusColor(item.lastActive || item.lastLogin) }]} />
+                    </View>
+                    <View style={styles.userTextInfo}>
+                        <Text style={styles.name} numberOfLines={1}>{item.full_name || item.name || "No Name"}</Text>
+                        <Text style={styles.detail} numberOfLines={1}>{item.email || "N/A"}</Text>
+                    </View>
+                </TouchableOpacity>
 
-                    <Text style={styles.cleanMetaDate}>
-                        Active: {item.lastActive ? item.lastActive.split(",")[0] : "N/A"}
-                    </Text>
-                </View>
-
-                {/* 5. Clean Action Buttons Row */}
-                <View style={styles.cleanActionRow}>
-                    <TouchableOpacity
-                        style={styles.cleanAuditBtn}
-                        onPress={() => setSelectedUserForFraud(item)}
-                        activeOpacity={0.8}
-                    >
-                        <MaterialCommunityIcons name="shield-search" size={15} color="#38bdf8" style={{ marginRight: 5 }} />
-                        <Text style={styles.cleanAuditBtnText}>Full Audit</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={styles.cleanChatBtn}
-                        onPress={() => handleChatWithUser(item)}
-                        activeOpacity={0.8}
-                    >
-                        <MaterialCommunityIcons name="chat-outline" size={15} color="#cbd5e1" style={{ marginRight: 4 }} />
-                        <Text style={styles.cleanChatBtnText}>Chat</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={styles.cleanEditBtn}
-                        onPress={() => handleOpenModal("coins", "Edit Coins", item.walletBalance, item)}
-                        activeOpacity={0.8}
-                    >
-                        <MaterialCommunityIcons name="pencil-outline" size={14} color="#cbd5e1" style={{ marginRight: 3 }} />
-                        <Text style={styles.cleanEditBtnText}>Edit</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={styles.cleanDeleteBtn}
-                        onPress={() => handleDeleteUser(item)}
-                        activeOpacity={0.8}
-                    >
-                        <MaterialCommunityIcons name="trash-can-outline" size={15} color="#ef4444" />
-                    </TouchableOpacity>
-                </View>
+                <TouchableOpacity
+                    style={styles.balanceTag}
+                    activeOpacity={0.8}
+                    onPress={() => handleOpenModal("coins", "Edit Coins", item.walletBalance, item)}
+                >
+                    <Text style={styles.walletBalanceText}>{item.walletBalance || 0} 🪙</Text>
+                </TouchableOpacity>
             </View>
-        );
-    };
+
+            <View style={styles.divider} />
+
+            {/* 2. Info lines with consistent Copy badges */}
+            <View style={styles.infoLine}>
+                <Text style={styles.detail}>📱 Mobile: {item.mobile || "N/A"}</Text>
+                {item.mobile && item.mobile !== "N/A" ? (
+                    <TouchableOpacity onPress={() => copyToClipboard(item.mobile, "Mobile Number")}>
+                        <Text style={styles.copyLabel}>Copy</Text>
+                    </TouchableOpacity>
+                ) : null}
+            </View>
+
+            <View style={styles.infoLine}>
+                <Text style={styles.detail}>💰 UPI / PayPal: {item.upi || "N/A"}</Text>
+                {item.upi && item.upi !== "N/A" ? (
+                    <TouchableOpacity onPress={() => copyToClipboard(item.upi, "UPI / PayPal ID")}>
+                        <Text style={styles.copyLabel}>Copy</Text>
+                    </TouchableOpacity>
+                ) : null}
+            </View>
+
+            <View style={styles.infoLine}>
+                <Text style={[styles.detail, { flex: 1, marginRight: 8 }]} numberOfLines={1}>🆔 ID: {item.id}</Text>
+                <TouchableOpacity onPress={() => copyToClipboard(item.id, "User ID")}>
+                    <Text style={styles.copyLabel}>Copy</Text>
+                </TouchableOpacity>
+            </View>
+
+            <View style={styles.divider} />
+            <Text style={styles.sectionLabel}>Device Info:</Text>
+            {item.deviceInfo ? (
+                <View style={styles.deviceBox}>
+                    <Text style={styles.deviceText}>IP: {item.deviceInfo.ipAddress || item.deviceInfo.ip || "N/A"}</Text>
+                    <Text style={styles.deviceText}>Location: {item.deviceInfo.city || "N/A"} ({item.deviceInfo.latitude || "0"}, {item.deviceInfo.longitude || "0"})</Text>
+                    <Text style={styles.deviceText}>Model: {item.deviceInfo.model || item.deviceInfo.deviceName || "N/A"}</Text>
+                    <Text style={styles.deviceText}>Brand: {item.deviceInfo.brand || "N/A"}</Text>
+                    <Text style={styles.deviceText}>OS: {item.deviceInfo.systemVersion || item.deviceInfo.osVersion || "N/A"}</Text>
+                    <Text style={styles.deviceText}>Carrier: {item.deviceInfo.carrier || "N/A"}</Text>
+                </View>
+            ) : (
+                <View style={styles.deviceBox}>
+                    <Text style={styles.deviceText}>No detailed info (Update Required)</Text>
+                </View>
+            )}
+
+            <Text style={styles.date}>Last Active: {item.lastActive || item.lastLogin || "N/A"}</Text>
+
+            {/* 🛡️ Fraud Check & Withdrawal History Summary Card */}
+            <View style={styles.fraudSummaryBox}>
+                <View style={styles.fraudHeaderRow}>
+                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                        <MaterialCommunityIcons name="shield-search" size={17} color="#38bdf8" style={{ marginRight: 6 }} />
+                        <Text style={styles.fraudTitle}>Fraud Check & Withdrawals</Text>
+                    </View>
+                    {item.withdrawStats?.pending > 0 && (
+                        <View style={styles.pendingBadge}>
+                            <Text style={styles.pendingBadgeText}>{item.withdrawStats.pending} PENDING</Text>
+                        </View>
+                    )}
+                </View>
+
+                <View style={styles.fraudGrid}>
+                    <View style={styles.fraudGridItem}>
+                        <Text style={styles.fraudGridLabel}>Total Req</Text>
+                        <Text style={styles.fraudGridValue}>{item.withdrawStats?.total || 0}</Text>
+                    </View>
+                    <View style={styles.fraudGridItem}>
+                        <Text style={styles.fraudGridLabel}>Paid</Text>
+                        <Text style={[styles.fraudGridValue, { color: "#10b981" }]}>{item.withdrawStats?.paid || 0}</Text>
+                    </View>
+                    <View style={styles.fraudGridItem}>
+                        <Text style={styles.fraudGridLabel}>Pending</Text>
+                        <Text style={[styles.fraudGridValue, { color: item.withdrawStats?.pending > 0 ? "#f59e0b" : "#94a3b8" }]}>
+                            {item.withdrawStats?.pending || 0}
+                        </Text>
+                    </View>
+                    <View style={styles.fraudGridItem}>
+                        <Text style={styles.fraudGridLabel}>Coins Paid</Text>
+                        <Text style={[styles.fraudGridValue, { color: "#38bdf8" }]}>{item.withdrawStats?.totalPaidCoins || 0}</Text>
+                    </View>
+                </View>
+
+                {/* Risk Alerts */}
+                {item.withdrawStats?.multiUpiCount > 1 && (
+                    <View style={styles.fraudAlertBadge}>
+                        <MaterialCommunityIcons name="alert-decagram" size={15} color="#ef4444" style={{ marginRight: 6 }} />
+                        <Text style={styles.fraudAlertText}>
+                            High Risk: User used {item.withdrawStats.multiUpiCount} different UPI/Payout accounts!
+                        </Text>
+                    </View>
+                )}
+
+                {/* 🪙 Coin Earnings Breakdown (How He Got Coins) */}
+                <View style={styles.coinEarningsSummaryBox}>
+                    <View style={styles.coinEarningsHeader}>
+                        <View style={{ flexDirection: "row", alignItems: "center" }}>
+                            <Text style={{ fontSize: 13, marginRight: 5 }}>💰</Text>
+                            <Text style={styles.coinEarningsTitle}>How He Got Coins</Text>
+                        </View>
+                        <Text style={styles.totalEarnedLabel}>
+                            Total Earned: <Text style={{ color: "#10b981", fontWeight: "bold" }}>🪙 {item.coinStats?.totalEarnedCoins || 0}</Text>
+                        </Text>
+                    </View>
+
+                    <View style={styles.coinGrid}>
+                        {/* 📺 Full Watch Video Ads */}
+                        <View style={[styles.coinGridItem, { borderColor: "rgba(56, 189, 248, 0.45)", backgroundColor: "rgba(14, 165, 233, 0.08)" }]}>
+                            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 2 }}>
+                                <Text style={{ fontSize: 12, marginRight: 3 }}>📺</Text>
+                                <Text style={[styles.coinGridLabel, { color: "#38bdf8", fontWeight: "bold" }]}>Watch Ads</Text>
+                            </View>
+                            <Text style={[styles.coinGridValue, { color: "#38bdf8" }]}>
+                                {item.coinStats?.watchCoins || 0}
+                            </Text>
+                            <Text style={styles.coinGridSub}>
+                                {item.coinStats?.watchCount || 0} ads
+                            </Text>
+                        </View>
+
+                        {/* 🎁 Daily Bonus Spin */}
+                        <View style={styles.coinGridItem}>
+                            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 2 }}>
+                                <Text style={{ fontSize: 12, marginRight: 3 }}>🎁</Text>
+                                <Text style={styles.coinGridLabel}>Daily Spin</Text>
+                            </View>
+                            <Text style={[styles.coinGridValue, { color: "#f59e0b" }]}>
+                                {item.coinStats?.dailyBonusCoins || 0}
+                            </Text>
+                            <Text style={styles.coinGridSub}>
+                                {item.coinStats?.dailyBonusCount || 0} spins
+                            </Text>
+                        </View>
+
+                        {/* 🧠 Quiz Trivia */}
+                        <View style={styles.coinGridItem}>
+                            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 2 }}>
+                                <Text style={{ fontSize: 12, marginRight: 3 }}>🧠</Text>
+                                <Text style={styles.coinGridLabel}>Quiz</Text>
+                            </View>
+                            <Text style={[styles.coinGridValue, { color: "#a855f7" }]}>
+                                {item.coinStats?.quizCoins || 0}
+                            </Text>
+                            <Text style={styles.coinGridSub}>
+                                {item.coinStats?.quizCount || 0} games
+                            </Text>
+                        </View>
+
+                        {/* 💼 Current Wallet Balance */}
+                        <View style={styles.coinGridItem}>
+                            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 2 }}>
+                                <Text style={{ fontSize: 12, marginRight: 3 }}>💼</Text>
+                                <Text style={styles.coinGridLabel}>Balance</Text>
+                            </View>
+                            <Text style={[styles.coinGridValue, { color: "#22c55e" }]}>
+                                {item.walletBalance || 0}
+                            </Text>
+                            <Text style={styles.coinGridSub}>
+                                in wallet
+                            </Text>
+                        </View>
+                    </View>
+                </View>
+
+                <TouchableOpacity
+                    style={styles.viewHistoryBtn}
+                    onPress={() => setSelectedUserForFraud(item)}
+                    activeOpacity={0.8}
+                >
+                    <MaterialCommunityIcons name="shield-search" size={16} color="#38bdf8" style={{ marginRight: 6 }} />
+                    <Text style={styles.viewHistoryBtnText}>
+                        View Full Audit (Watch Coins & Withdrawals)
+                    </Text>
+                </TouchableOpacity>
+            </View>
+
+            <View style={styles.divider} />
+
+            {/* 3. Balanced Action Row: Direct Message + Edit Coins + Delete */}
+            <View style={styles.userCardActionRow}>
+                <TouchableOpacity
+                    style={styles.chatUserBtn}
+                    onPress={() => handleChatWithUser(item)}
+                    activeOpacity={0.8}
+                >
+                    <MaterialCommunityIcons name="chat-processing-outline" size={17} color="#fff" style={{ marginRight: 6 }} />
+                    <Text style={styles.chatUserBtnText}>Direct Message</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={styles.editCoinsBtn}
+                    onPress={() => handleOpenModal("coins", "Edit Coins", item.walletBalance, item)}
+                    activeOpacity={0.8}
+                >
+                    <Text style={styles.editCoinsBtnText}>🪙 Edit</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={styles.deleteUserBtn}
+                    onPress={() => handleDeleteUser(item)}
+                    activeOpacity={0.8}
+                >
+                    <MaterialCommunityIcons name="trash-can-outline" size={16} color="#ef4444" style={{ marginRight: 4 }} />
+                    <Text style={styles.deleteUserBtnText}>Del</Text>
+                </TouchableOpacity>
+            </View>
+        </View>
+    );
 
     const renderMessageItem = ({ item }) => (
         <View style={styles.card}>

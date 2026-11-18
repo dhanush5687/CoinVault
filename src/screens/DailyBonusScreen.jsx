@@ -47,8 +47,8 @@ const WEIGHTED_POOL = [
   500,
 ];
 
-// Test Ad Unit
-const BANNER_ID = ADMOB_BANNER_ID;
+// Live Ad Unit ID
+const BANNER_ID = ADMOB_BANNER_ID || "ca-app-pub-2490251867268823/5116361111";
 
 import { supabase } from "../config/supabase";
 import { showInterstitialAd } from "../ads/InterstitialAdManager";

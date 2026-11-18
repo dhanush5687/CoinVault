@@ -18,6 +18,8 @@ import {
   BannerAdSize,
 } from "react-native-google-mobile-ads";
 import { ADMOB_BANNER_ID } from "@env";
+
+const LIVE_BANNER_ID = ADMOB_BANNER_ID || "ca-app-pub-2490251867268823/5116361111";
 import { preloadRewardedAds, showRewardedAd, getAvailableAdsCount } from "../ads/RewardedAdManager";
 
 const { width } = Dimensions.get("window");
@@ -105,7 +107,7 @@ export default function PlayAllVideoAdsScreen({ navigation }) {
 
       {/* TOP BANNER */}
       <View style={styles.banner}>
-        <BannerAd unitId={ADMOB_BANNER_ID} size={BannerAdSize.ADAPTIVE_BANNER} />
+        <BannerAd unitId={LIVE_BANNER_ID} size={BannerAdSize.ADAPTIVE_BANNER} />
       </View>
 
       {/* CONTENT */}
@@ -144,7 +146,7 @@ export default function PlayAllVideoAdsScreen({ navigation }) {
 
       {/* BOTTOM BANNER */}
       <View style={styles.banner}>
-        <BannerAd unitId={ADMOB_BANNER_ID} size={BannerAdSize.ADAPTIVE_BANNER} />
+        <BannerAd unitId={LIVE_BANNER_ID} size={BannerAdSize.ADAPTIVE_BANNER} />
       </View>
 
       {/* NO ADS POPUP */}

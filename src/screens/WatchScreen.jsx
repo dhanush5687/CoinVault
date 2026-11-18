@@ -20,6 +20,8 @@ import { useFocusEffect } from "@react-navigation/native";
 import {
     ADMOB_BANNER_ID,
 } from "@env";
+
+const LIVE_BANNER_ID = ADMOB_BANNER_ID || "ca-app-pub-2490251867268823/5116361111";
 import { preloadRewardedAds, showRewardedAd, getAvailableAdsCount } from "../ads/RewardedAdManager";
 import { showAppOpenAd } from "../ads/AppOpenManager";
 import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityIcons";
@@ -152,14 +154,14 @@ export default function WatchScreen({ navigation }) {
             {/* TOP BANNER */}
             <View style={styles.banner}>
                 <BannerAd
-                    unitId={ADMOB_BANNER_ID}
+                    unitId={LIVE_BANNER_ID}
                     size={BannerAdSize.ADAPTIVE_BANNER}
                 />
             </View>
 
             <View style={styles.banner}>
                 <BannerAd
-                    unitId={ADMOB_BANNER_ID}
+                    unitId={LIVE_BANNER_ID}
                     size={BannerAdSize.MEDIUM_RECTANGLE}
                 />
             </View>
@@ -193,7 +195,7 @@ export default function WatchScreen({ navigation }) {
             {/* BOTTOM BANNER */}
             <View style={styles.banner}>
                 <BannerAd
-                    unitId={ADMOB_BANNER_ID}
+                    unitId={LIVE_BANNER_ID}
                     size={BannerAdSize.ADAPTIVE_BANNER}
                 />
             </View>

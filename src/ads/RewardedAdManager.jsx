@@ -5,12 +5,14 @@ import {
 } from "react-native-google-mobile-ads";
 import { ADMOB_REWARDED_ID } from "@env";
 
+const LIVE_REWARDED_ID = ADMOB_REWARDED_ID || "ca-app-pub-2490251867268823/3936964593";
+
 const MAX_ADS = 15;
 let adQueue = [];
 let loading = false;
 
 const createAd = () =>
-  RewardedAd.createForAdRequest(ADMOB_REWARDED_ID, {
+  RewardedAd.createForAdRequest(LIVE_REWARDED_ID, {
     requestNonPersonalizedAdsOnly: false,
   });
 
