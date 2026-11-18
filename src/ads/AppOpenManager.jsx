@@ -1,47 +1,44 @@
 import {
   AppOpenAd,
   AdEventType,
-  TestIds,
 } from "react-native-google-mobile-ads";
 import { ADMOB_APP_OPEN_ID } from "@env";
+
+const LIVE_APP_OPEN_ID = ADMOB_APP_OPEN_ID || "ca-app-pub-2490251867268823/2498586385";
 
 let appOpenAd = null;
 let isLoaded = false;
 let isLoading = false;
-let usingFallback = false;
 let lastErrorTime = 0;
 const ERROR_COOLDOWN_MS = 15000;
 
-export const loadAppOpenAd = (forceFallback = false) => {
+export const loadAppOpenAd = () => {
   const now = Date.now();
-  if (isLoading) return;
-  if (!forceFallback && now - lastErrorTime < ERROR_COOLDOWN_MS) {
+  if (isLoading || isLoaded) return;
+  if (now - lastErrorTime < ERROR_COOLDOWN_MS) {
     return;
   }
 
   isLoading = true;
   isLoaded = false;
 
-  const targetAdUnitId = (forceFallback || usingFallback || !ADMOB_APP_OPEN_ID || __DEV__)
-    ? TestIds.APP_OPEN
-    : ADMOB_APP_OPEN_ID;
-
-  console.log(`📡 AdMob: Loading AppOpen (${targetAdUnitId === TestIds.APP_OPEN ? "Test Unit" : "Live Unit"})...`);
+  console.log("📡 AdMob: Loading Live AppOpen Ad (" + LIVE_APP_OPEN_ID + ")...");
 
   try {
-    appOpenAd = AppOpenAd.createForAdRequest(targetAdUnitId, {
+    appOpenAd = AppOpenAd.createForAdRequest(LIVE_APP_OPEN_ID, {
       requestNonPersonalizedAdsOnly: false,
     });
 
     appOpenAd.addAdEventListener(AdEventType.LOADED, () => {
       isLoaded = true;
       isLoading = false;
-      console.log(`🚀 AdMob: AppOpen Loaded (${targetAdUnitId === TestIds.APP_OPEN ? "Test Unit" : "Live Unit"})`);
+      console.log("🚀 AdMob: Live AppOpen Loaded Successfully!");
     });
 
     appOpenAd.addAdEventListener(AdEventType.CLOSED, () => {
       isLoaded = false;
       isLoading = false;
+      appOpenAd = null;
       setTimeout(() => {
         loadAppOpenAd();
       }, 3000);
@@ -50,16 +47,13 @@ export const loadAppOpenAd = (forceFallback = false) => {
     appOpenAd.addAdEventListener(AdEventType.ERROR, (err) => {
       isLoaded = false;
       isLoading = false;
+      appOpenAd = null;
       lastErrorTime = Date.now();
-      console.log("❌ AdMob: AppOpen Error:", err.message);
+      console.log("❌ AdMob: Live AppOpen Error:", err.message);
 
-      if (targetAdUnitId !== TestIds.APP_OPEN) {
-        console.log("🔄 AdMob: Live AppOpen returned error (403/no-fill). Switching to Google Test Ad Unit...");
-        usingFallback = true;
-        setTimeout(() => {
-          loadAppOpenAd(true);
-        }, 1500);
-      }
+      setTimeout(() => {
+        loadAppOpenAd();
+      }, 8000);
     });
 
     appOpenAd.load();
@@ -73,18 +67,20 @@ export const loadAppOpenAd = (forceFallback = false) => {
 export const showAppOpenAd = () => {
   if (isLoaded && appOpenAd) {
     try {
-      appOpenAd.show().catch(e => {
+      appOpenAd.show().catch((e) => {
         console.log("❌ AdMob: AppOpen Show Catch:", e.message);
         isLoaded = false;
+        appOpenAd = null;
         loadAppOpenAd();
       });
     } catch (e) {
-      console.log("❌ AdMob: AppOpen Show Global Catch");
+      console.log("❌ AdMob: AppOpen Show Global Catch:", e.message);
       isLoaded = false;
+      appOpenAd = null;
       loadAppOpenAd();
     }
   } else {
-    console.log("⚠️ AdMob: AppOpen not ready, forcing load");
-    loadAppOpenAd(); // Force load if not ready
+    console.log("⚠️ AdMob: AppOpen not ready, triggering live load");
+    loadAppOpenAd();
   }
 };

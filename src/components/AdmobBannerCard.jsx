@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { View, Text, StyleSheet } from "react-native";
-import { BannerAd, BannerAdSize, TestIds } from "react-native-google-mobile-ads";
+import { BannerAd, BannerAdSize } from "react-native-google-mobile-ads";
 import { ADMOB_BANNER_ID } from "@env";
 
 export default function AdmobBannerCard({
@@ -8,14 +8,10 @@ export default function AdmobBannerCard({
   asCard = true,
   size = BannerAdSize.ADAPTIVE_BANNER,
 }) {
-  const [useFallback, setUseFallback] = useState(false);
   const [adLoaded, setAdLoaded] = useState(false);
 
-  // If live unit fails (403/no-fill), fallback to Google Test Banner ID
-  const bannerUnitId =
-    useFallback || !ADMOB_BANNER_ID || __DEV__
-      ? TestIds.BANNER
-      : (ADMOB_BANNER_ID || "ca-app-pub-2490251867268823/5116361111");
+  // Strictly use Real Live AdMob Banner Unit ID
+  const bannerUnitId = ADMOB_BANNER_ID || "ca-app-pub-2490251867268823/5116361111";
 
   return (
     <View style={asCard ? [styles.adCard, style] : [styles.bannerWrap, style]}>
@@ -39,10 +35,6 @@ export default function AdmobBannerCard({
           }}
           onAdFailedToLoad={(error) => {
             console.log("❌ AdMob: Banner Load Error:", error.message);
-            if (!useFallback && bannerUnitId !== TestIds.BANNER) {
-              console.log("🔄 AdMob: Switching Banner to Google Test Unit...");
-              setUseFallback(true);
-            }
           }}
         />
       </View>
@@ -52,38 +44,39 @@ export default function AdmobBannerCard({
 
 const styles = StyleSheet.create({
   adCard: {
-    backgroundColor: "#111827",
-    marginHorizontal: 15,
-    marginVertical: 8,
-    padding: 8,
+    backgroundColor: "#161b26",
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#1e293b",
-    alignItems: "center",
-  },
-  bannerWrap: {
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    marginVertical: 10,
+    width: "100%",
     alignItems: "center",
     justifyContent: "center",
-    marginVertical: 4,
+  },
+  bannerWrap: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    marginVertical: 5,
   },
   adHeader: {
     width: "100%",
     flexDirection: "row",
-    justifyContent: "flex-end",
+    justifyContent: "flex-start",
     marginBottom: 6,
-    paddingHorizontal: 4,
+    paddingHorizontal: 6,
   },
   adBadge: {
-    backgroundColor: "#facc1522",
-    borderColor: "#facc15",
-    borderWidth: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
     paddingHorizontal: 6,
-    paddingVertical: 1,
+    paddingVertical: 2,
     borderRadius: 4,
   },
   adBadgeText: {
-    color: "#facc15",
-    fontSize: 9,
+    color: "#9ca3af",
+    fontSize: 10,
     fontWeight: "700",
     letterSpacing: 0.5,
   },
@@ -91,8 +84,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
-    borderRadius: 8,
-    width: "100%",
   },
 });
-

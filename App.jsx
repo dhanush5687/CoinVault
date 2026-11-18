@@ -106,9 +106,6 @@ function App() {
     useEffect(() => {
         const initAds = async () => {
             await mobileAds().initialize();
-            await mobileAds().setRequestConfiguration({
-                testDeviceIdentifiers: ['EMULATOR'],
-            }).catch(() => {});
             preloadRewardedAds(); // preload rewarded ads
             loadAppOpenAd(); // preload app open ads
             loadInterstitialAd(); // preload interstitial ads
@@ -117,7 +114,7 @@ function App() {
             const { syncUserActivity } = require("./src/services/supabaseService");
             syncUserActivity();
 
-            console.log("✅ AdMob initialized");
+            console.log("✅ AdMob initialized with Live Production Ads");
         };
         initAds();
 
