@@ -37,6 +37,42 @@ export default function AdminPanelScreen({ navigation }) {
     const [modalType, setModalType] = useState(""); // "coins" or "message" or "addMessage"
     const [selectedChatUser, setSelectedChatUser] = useState(null);
     const [selectedUserForFraud, setSelectedUserForFraud] = useState(null);
+    const [fraudModalTab, setFraudModalTab] = useState("coins"); // "coins" or "withdrawals"
+    const [coinFilter, setCoinFilter] = useState("all"); // "all", "watch", "daily", "quiz"
+    const [liveUserTransactions, setLiveUserTransactions] = useState([]);
+    const [loadingTx, setLoadingTx] = useState(false);
+
+    // Fetch fresh transactions when inspecting a user for full coin & fraud audit
+    useEffect(() => {
+        if (selectedUserForFraud) {
+            setFraudModalTab("coins");
+            setCoinFilter("all");
+            fetchFreshUserTransactions(selectedUserForFraud);
+        } else {
+            setLiveUserTransactions([]);
+        }
+    }, [selectedUserForFraud]);
+
+    const fetchFreshUserTransactions = async (user) => {
+        if (!user || !user.id) return;
+        setLoadingTx(true);
+        try {
+            const { data } = await supabase
+                .from("wallet_transactions")
+                .select("*")
+                .eq("user_id", user.id)
+                .order("created_at", { ascending: false });
+            if (data && data.length > 0) {
+                setLiveUserTransactions(data);
+            } else {
+                setLiveUserTransactions(user.transactions || []);
+            }
+        } catch (_) {
+            setLiveUserTransactions(user.transactions || []);
+        } finally {
+            setLoadingTx(false);
+        }
+    };
 
     // Quiz Controller States (Admin)
     const [quizApiUrl, setQuizApiUrl] = useState("");
@@ -183,6 +219,16 @@ export default function AdminPanelScreen({ navigation }) {
                         ...withdrawObj[key]
                     }));
 
+                    // Fetch wallet transactions from Supabase to compute full watch coins and coin sources
+                    let allWalletTransactions = [];
+                    try {
+                        const { data: txData } = await supabase
+                            .from("wallet_transactions")
+                            .select("id, user_id, transaction_type, amount, balance_after, description, created_at")
+                            .order("created_at", { ascending: false });
+                        if (txData) allWalletTransactions = txData;
+                    } catch (_) {}
+
                     const usersList = Object.keys(usersObj).map((key) => {
                         const val = usersObj[key];
                         const walletData = walletsObj[key] || {};
@@ -222,6 +268,52 @@ export default function AdminPanelScreen({ navigation }) {
                             if (w.upi && w.upi !== "N/A") upiSet.add(w.upi.trim().toLowerCase());
                         });
 
+                        // Filter transactions for this user
+                        const userTransactions = allWalletTransactions.filter(t => {
+                            if (t.user_id && (t.user_id === key || t.user_id === sp.id)) return true;
+                            return false;
+                        });
+
+                        // Breakdown of how the user got coins (Watch Ads, Daily Bonus, Quiz, Admin)
+                        let watchCoins = 0;
+                        let watchCount = 0;
+                        let dailyBonusCoins = 0;
+                        let dailyBonusCount = 0;
+                        let quizCoins = 0;
+                        let quizCount = 0;
+                        let adminCoins = 0;
+                        let refundCoins = 0;
+                        let otherCoins = 0;
+
+                        userTransactions.forEach(t => {
+                            const amt = parseInt(t.amount) || 0;
+                            const type = (t.transaction_type || "").toLowerCase();
+                            const desc = (t.description || "").toLowerCase();
+
+                            if (type.includes("ad") || desc.includes("watched") || desc.includes("rewarded ad") || desc.includes("ad reward")) {
+                                watchCoins += amt;
+                                watchCount += 1;
+                            } else if (type.includes("daily") || desc.includes("daily") || desc.includes("spin")) {
+                                dailyBonusCoins += amt;
+                                dailyBonusCount += 1;
+                            } else if (type.includes("quiz") || desc.includes("quiz")) {
+                                quizCoins += amt;
+                                quizCount += 1;
+                            } else if (type.includes("admin") || type.includes("manual") || desc.includes("admin") || desc.includes("edit")) {
+                                adminCoins += amt;
+                            } else if (type.includes("refund") || desc.includes("refund")) {
+                                refundCoins += amt;
+                            } else if (amt > 0) {
+                                otherCoins += amt;
+                            }
+                        });
+
+                        const totalEarnedCoins = watchCoins + dailyBonusCoins + quizCoins + adminCoins + refundCoins + otherCoins;
+                        const currentBalance = walletData.balance || 0;
+                        const totalPendingCoins = pendingList.reduce((acc, curr) => acc + (parseInt(curr.coins) || 0), 0);
+                        const unaccountedCoins = (currentBalance + totalPaidCoins + totalPendingCoins) - totalEarnedCoins;
+                        const isSuspicious = unaccountedCoins > 100 && totalEarnedCoins > 0;
+
                         return {
                             id: key,
                             ... (typeof val === 'object' ? val : { rawData: val }),
@@ -241,7 +333,22 @@ export default function AdminPanelScreen({ navigation }) {
                                 totalRequestedCoins,
                                 multiUpiCount: upiSet.size,
                                 upiAccounts: Array.from(upiSet)
-                            }
+                            },
+                            coinStats: {
+                                watchCoins,
+                                watchCount,
+                                dailyBonusCoins,
+                                dailyBonusCount,
+                                quizCoins,
+                                quizCount,
+                                adminCoins,
+                                refundCoins,
+                                otherCoins,
+                                totalEarnedCoins,
+                                unaccountedCoins: Math.max(0, unaccountedCoins),
+                                isSuspicious
+                            },
+                            transactions: userTransactions
                         };
                     });
                     setData(usersList);
@@ -921,14 +1028,95 @@ export default function AdminPanelScreen({ navigation }) {
                     </View>
                 )}
 
+                {/* 🪙 Coin Earnings Breakdown (How He Got Coins) */}
+                <View style={styles.coinEarningsSummaryBox}>
+                    <View style={styles.coinEarningsHeader}>
+                        <View style={{ flexDirection: "row", alignItems: "center" }}>
+                            <Text style={{ fontSize: 13, marginRight: 5 }}>💰</Text>
+                            <Text style={styles.coinEarningsTitle}>How He Got Coins</Text>
+                        </View>
+                        <Text style={styles.totalEarnedLabel}>
+                            Total Earned: <Text style={{ color: "#10b981", fontWeight: "bold" }}>🪙 {item.coinStats?.totalEarnedCoins || 0}</Text>
+                        </Text>
+                    </View>
+
+                    <View style={styles.coinGrid}>
+                        {/* 📺 Full Watch Video Ads */}
+                        <View style={[styles.coinGridItem, { borderColor: "rgba(56, 189, 248, 0.45)", backgroundColor: "rgba(14, 165, 233, 0.08)" }]}>
+                            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 2 }}>
+                                <Text style={{ fontSize: 12, marginRight: 3 }}>📺</Text>
+                                <Text style={[styles.coinGridLabel, { color: "#38bdf8", fontWeight: "bold" }]}>Watch Ads</Text>
+                            </View>
+                            <Text style={[styles.coinGridValue, { color: "#38bdf8" }]}>
+                                {item.coinStats?.watchCoins || 0}
+                            </Text>
+                            <Text style={styles.coinGridSub}>
+                                {item.coinStats?.watchCount || 0} ads watched
+                            </Text>
+                        </View>
+
+                        {/* 🎁 Daily Bonus Spin */}
+                        <View style={styles.coinGridItem}>
+                            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 2 }}>
+                                <Text style={{ fontSize: 12, marginRight: 3 }}>🎁</Text>
+                                <Text style={styles.coinGridLabel}>Daily Spin</Text>
+                            </View>
+                            <Text style={[styles.coinGridValue, { color: "#f59e0b" }]}>
+                                {item.coinStats?.dailyBonusCoins || 0}
+                            </Text>
+                            <Text style={styles.coinGridSub}>
+                                {item.coinStats?.dailyBonusCount || 0} spins
+                            </Text>
+                        </View>
+
+                        {/* 🧠 Quiz Trivia */}
+                        <View style={styles.coinGridItem}>
+                            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 2 }}>
+                                <Text style={{ fontSize: 12, marginRight: 3 }}>🧠</Text>
+                                <Text style={styles.coinGridLabel}>Quiz</Text>
+                            </View>
+                            <Text style={[styles.coinGridValue, { color: "#a855f7" }]}>
+                                {item.coinStats?.quizCoins || 0}
+                            </Text>
+                            <Text style={styles.coinGridSub}>
+                                {item.coinStats?.quizCount || 0} games
+                            </Text>
+                        </View>
+
+                        {/* 💼 Current Wallet Balance */}
+                        <View style={styles.coinGridItem}>
+                            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 2 }}>
+                                <Text style={{ fontSize: 12, marginRight: 3 }}>💼</Text>
+                                <Text style={styles.coinGridLabel}>Balance</Text>
+                            </View>
+                            <Text style={[styles.coinGridValue, { color: "#22c55e" }]}>
+                                {item.walletBalance || 0}
+                            </Text>
+                            <Text style={styles.coinGridSub}>
+                                in wallet
+                            </Text>
+                        </View>
+                    </View>
+
+                    {/* Discrepancy Alert */}
+                    {item.coinStats?.isSuspicious && (
+                        <View style={[styles.fraudAlertBadge, { marginTop: 6, marginBottom: 4 }]}>
+                            <MaterialCommunityIcons name="alert" size={14} color="#ef4444" style={{ marginRight: 4 }} />
+                            <Text style={styles.fraudAlertText}>
+                                Suspicious: Wallet + Withdrawn exceeds earned coins by {item.coinStats.unaccountedCoins} coins!
+                            </Text>
+                        </View>
+                    )}
+                </View>
+
                 <TouchableOpacity
                     style={styles.viewHistoryBtn}
                     onPress={() => setSelectedUserForFraud(item)}
                     activeOpacity={0.8}
                 >
-                    <MaterialCommunityIcons name="history" size={16} color="#38bdf8" style={{ marginRight: 6 }} />
+                    <MaterialCommunityIcons name="shield-search" size={16} color="#38bdf8" style={{ marginRight: 6 }} />
                     <Text style={styles.viewHistoryBtnText}>
-                        View All {item.withdrawStats?.total || 0} Withdrawals (Full Audit)
+                        View Full Audit (Watch Coins & Withdrawals)
                     </Text>
                 </TouchableOpacity>
             </View>
@@ -1244,7 +1432,7 @@ export default function AdminPanelScreen({ navigation }) {
                         <View style={styles.fraudModalHeader}>
                             <View style={{ flex: 1, marginRight: 10 }}>
                                 <Text style={styles.fraudModalTitle}>
-                                    🛡️ Fraud Audit & History
+                                    🛡️ User Audit & Coin History
                                 </Text>
                                 <Text style={styles.fraudModalSub} numberOfLines={1}>
                                     {selectedUserForFraud?.full_name || selectedUserForFraud?.name || "User"} • {selectedUserForFraud?.mobile || selectedUserForFraud?.email || "N/A"}
@@ -1259,134 +1447,361 @@ export default function AdminPanelScreen({ navigation }) {
                             </TouchableOpacity>
                         </View>
 
-                        {/* User Risk Overview Box */}
-                        <View style={styles.fraudOverviewBox}>
-                            <View style={styles.fraudOverviewRow}>
-                                <Text style={styles.fraudOverviewLabel}>Current Wallet:</Text>
-                                <Text style={styles.fraudOverviewVal}>🪙 {selectedUserForFraud?.walletBalance || 0} Coins</Text>
-                            </View>
-                            <View style={styles.fraudOverviewRow}>
-                                <Text style={styles.fraudOverviewLabel}>Total Paid Coins:</Text>
-                                <Text style={[styles.fraudOverviewVal, { color: "#10b981" }]}>
-                                    🪙 {selectedUserForFraud?.withdrawStats?.totalPaidCoins || 0} Coins
+                        {/* Segmented Audit Switcher */}
+                        <View style={styles.modalTabBar}>
+                            <TouchableOpacity
+                                style={[styles.modalTabBtn, fraudModalTab === "coins" && styles.modalTabBtnActive]}
+                                onPress={() => setFraudModalTab("coins")}
+                            >
+                                <Text style={[styles.modalTabBtnText, fraudModalTab === "coins" && styles.modalTabBtnTextActive]}>
+                                    🪙 Coins & Watch History
                                 </Text>
-                            </View>
-                            <View style={styles.fraudOverviewRow}>
-                                <Text style={styles.fraudOverviewLabel}>Primary UPI / PayPal:</Text>
-                                <Text style={styles.fraudOverviewVal} numberOfLines={1}>{selectedUserForFraud?.upi || "N/A"}</Text>
-                            </View>
-                            {selectedUserForFraud?.withdrawStats?.multiUpiCount > 1 && (
-                                <View style={[styles.fraudAlertBadge, { marginTop: 6 }]}>
-                                    <MaterialCommunityIcons name="alert" size={14} color="#ef4444" style={{ marginRight: 4 }} />
-                                    <Text style={styles.fraudAlertText}>
-                                        Multi-Account Warning: Requested payouts to {selectedUserForFraud.withdrawStats.multiUpiCount} different UPI/PayPal accounts!
-                                    </Text>
-                                </View>
-                            )}
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.modalTabBtn, fraudModalTab === "withdrawals" && styles.modalTabBtnActive]}
+                                onPress={() => setFraudModalTab("withdrawals")}
+                            >
+                                <Text style={[styles.modalTabBtnText, fraudModalTab === "withdrawals" && styles.modalTabBtnTextActive]}>
+                                    💸 Withdrawals ({selectedUserForFraud?.withdrawals?.length || 0})
+                                </Text>
+                            </TouchableOpacity>
                         </View>
 
-                        {/* Withdrawal Transactions List */}
-                        <Text style={styles.fraudListHeader}>
-                            All Withdrawal Requests ({selectedUserForFraud?.withdrawals?.length || 0})
-                        </Text>
+                        {fraudModalTab === "coins" ? (
+                            (() => {
+                                const activeTx = liveUserTransactions.length > 0 ? liveUserTransactions : (selectedUserForFraud?.transactions || []);
+                                let watchCoins = 0;
+                                let watchCount = 0;
+                                let dailyBonusCoins = 0;
+                                let dailyBonusCount = 0;
+                                let quizCoins = 0;
+                                let quizCount = 0;
+                                let adminCoins = 0;
+                                let refundCoins = 0;
+                                let otherCoins = 0;
 
-                        {(!selectedUserForFraud?.withdrawals || selectedUserForFraud.withdrawals.length === 0) ? (
-                            <View style={styles.emptyFraudBox}>
-                                <MaterialCommunityIcons name="check-circle-outline" size={40} color="#64748b" />
-                                <Text style={styles.emptyFraudText}>No withdrawal requests on record for this user.</Text>
-                            </View>
-                        ) : (
-                            <ScrollView
-                                style={styles.fraudScroll}
-                                showsVerticalScrollIndicator={true}
-                                contentContainerStyle={{ paddingBottom: 20 }}
-                            >
-                                {selectedUserForFraud.withdrawals.map((w, index) => {
-                                    const isPaid = w.status === "Paid";
-                                    const isPending = w.status === "Pending";
-                                    const statusColor = isPaid ? "#10b981" : (isPending ? "#f59e0b" : "#ef4444");
+                                activeTx.forEach(t => {
+                                    const amt = parseInt(t.amount) || 0;
+                                    const type = (t.transaction_type || "").toLowerCase();
+                                    const desc = (t.description || "").toLowerCase();
 
-                                    return (
-                                        <View key={w.id || index} style={styles.fraudHistoryCard}>
-                                            <View style={styles.fraudHistoryCardHeader}>
-                                                <View style={{ flexDirection: "row", alignItems: "center" }}>
-                                                    <Text style={styles.fraudCoinsText}>🪙 {w.coins} Coins</Text>
-                                                    {w.rupees && (
-                                                        <Text style={styles.fraudRupeesText}>(₹{w.rupees})</Text>
-                                                    )}
-                                                </View>
-                                                <View style={[styles.fraudStatusBadge, { backgroundColor: `${statusColor}22`, borderColor: statusColor }]}>
-                                                    <Text style={[styles.fraudStatusText, { color: statusColor }]}>
-                                                        {w.status || "Pending"}
-                                                    </Text>
+                                    if (type.includes("ad") || desc.includes("watched") || desc.includes("rewarded ad") || desc.includes("ad reward")) {
+                                        watchCoins += amt;
+                                        watchCount += 1;
+                                    } else if (type.includes("daily") || desc.includes("daily") || desc.includes("spin")) {
+                                        dailyBonusCoins += amt;
+                                        dailyBonusCount += 1;
+                                    } else if (type.includes("quiz") || desc.includes("quiz")) {
+                                        quizCoins += amt;
+                                        quizCount += 1;
+                                    } else if (type.includes("admin") || type.includes("manual") || desc.includes("admin") || desc.includes("edit")) {
+                                        adminCoins += amt;
+                                    } else if (type.includes("refund") || desc.includes("refund")) {
+                                        refundCoins += amt;
+                                    } else if (amt > 0) {
+                                        otherCoins += amt;
+                                    }
+                                });
+
+                                const totalEarned = watchCoins + dailyBonusCoins + quizCoins + adminCoins + refundCoins + otherCoins;
+                                const currentBal = selectedUserForFraud?.walletBalance || 0;
+                                const totalPaid = selectedUserForFraud?.withdrawStats?.totalPaidCoins || 0;
+                                const totalPending = (selectedUserForFraud?.withdrawals || [])
+                                    .filter(w => w.status === "Pending")
+                                    .reduce((acc, curr) => acc + (parseInt(curr.coins) || 0), 0);
+                                const unaccounted = (currentBal + totalPaid + totalPending) - totalEarned;
+                                const isSuspicious = unaccounted > 100 && totalEarned > 0;
+
+                                const filteredTx = activeTx.filter(t => {
+                                    if (coinFilter === "all") return true;
+                                    const type = (t.transaction_type || "").toLowerCase();
+                                    const desc = (t.description || "").toLowerCase();
+                                    if (coinFilter === "watch") {
+                                        return type.includes("ad") || desc.includes("watched") || desc.includes("rewarded ad");
+                                    }
+                                    if (coinFilter === "daily") {
+                                        return type.includes("daily") || desc.includes("spin");
+                                    }
+                                    if (coinFilter === "quiz") {
+                                        return type.includes("quiz");
+                                    }
+                                    return true;
+                                });
+
+                                return (
+                                    <ScrollView style={styles.fraudScroll} showsVerticalScrollIndicator={true} contentContainerStyle={{ paddingBottom: 25 }}>
+                                        {/* 📺 Hero Card: Full Watch Ads Breakdown */}
+                                        <View style={styles.watchHeroCard}>
+                                            <View style={styles.watchHeroLeft}>
+                                                <Text style={{ fontSize: 26, marginRight: 10 }}>📺</Text>
+                                                <View>
+                                                    <Text style={styles.watchHeroTitle}>Watch Ads & Videos</Text>
+                                                    <Text style={styles.watchHeroSub}>{watchCount} Rewarded Video Ads Watched</Text>
                                                 </View>
                                             </View>
-
-                                            <View style={styles.divider} />
-
-                                            <View style={styles.infoLine}>
-                                                <Text style={styles.detail}>Payout To:</Text>
-                                                <Text style={[styles.detail, { color: "#fff", fontWeight: "bold", flex: 1, textAlign: "right" }]}>
-                                                    {w.upi || "N/A"}
-                                                </Text>
-                                            </View>
-
-                                            <View style={styles.infoLine}>
-                                                <Text style={styles.detail}>Date:</Text>
-                                                <Text style={[styles.detail, { color: "#94a3b8" }]}>
-                                                    {w.date || (w.timestamp ? new Date(w.timestamp).toLocaleString() : "N/A")}
-                                                </Text>
-                                            </View>
-
-                                            {w.utrId ? (
-                                                <View style={styles.infoLine}>
-                                                    <Text style={[styles.detail, { color: "#38bdf8", fontWeight: "600" }]}>
-                                                        UTR / Ref ID: {w.utrId}
-                                                    </Text>
-                                                    <TouchableOpacity onPress={() => copyToClipboard(w.utrId, "UTR ID")}>
-                                                        <Text style={styles.copyLabel}>Copy</Text>
-                                                    </TouchableOpacity>
-                                                </View>
-                                            ) : null}
-
-                                            {w.paidAt ? (
-                                                <Text style={[styles.detail, { color: "#22c55e", fontSize: 11, marginTop: 2 }]}>
-                                                    Paid Timestamp: {new Date(w.paidAt).toLocaleString()}
-                                                </Text>
-                                            ) : null}
-
-                                            {w.rejectReason ? (
-                                                <Text style={[styles.detail, { color: "#ef4444", fontSize: 11, marginTop: 2 }]}>
-                                                    Reason: {w.rejectReason}
-                                                </Text>
-                                            ) : null}
-
-                                            {/* Quick Actions if Pending */}
-                                            {isPending && (
-                                                <View style={[styles.actionRow, { marginTop: 10 }]}>
-                                                    <TouchableOpacity
-                                                        style={styles.paidBtn}
-                                                        onPress={() => {
-                                                            setSelectedUserForFraud(null);
-                                                            handleMarkAsPaid(w);
-                                                        }}
-                                                    >
-                                                        <Text style={styles.btnText}>Mark Paid</Text>
-                                                    </TouchableOpacity>
-                                                    <TouchableOpacity
-                                                        style={styles.rejectBtn}
-                                                        onPress={() => {
-                                                            setSelectedUserForFraud(null);
-                                                            handleMarkWrongDetails(w);
-                                                        }}
-                                                    >
-                                                        <Text style={styles.btnText}>Wrong Details</Text>
-                                                    </TouchableOpacity>
-                                                </View>
-                                            )}
+                                            <Text style={styles.watchHeroCoins}>+{watchCoins} Coins</Text>
                                         </View>
-                                    );
-                                })}
+
+                                        {/* 📊 All Coin Sources Grid */}
+                                        <View style={styles.coinSourcesGrid}>
+                                            <View style={styles.coinSourceCard}>
+                                                <Text style={styles.coinSourceCardLabel}>🎁 Daily Spin</Text>
+                                                <Text style={[styles.coinSourceCardVal, { color: "#f59e0b" }]}>{dailyBonusCoins}</Text>
+                                                <Text style={styles.coinSourceCardSub}>{dailyBonusCount} spins claimed</Text>
+                                            </View>
+                                            <View style={styles.coinSourceCard}>
+                                                <Text style={styles.coinSourceCardLabel}>🧠 Quiz Trivia</Text>
+                                                <Text style={[styles.coinSourceCardVal, { color: "#a855f7" }]}>{quizCoins}</Text>
+                                                <Text style={styles.coinSourceCardSub}>{quizCount} games won</Text>
+                                            </View>
+                                            <View style={styles.coinSourceCard}>
+                                                <Text style={styles.coinSourceCardLabel}>📥 Total Earned</Text>
+                                                <Text style={[styles.coinSourceCardVal, { color: "#10b981" }]}>{totalEarned}</Text>
+                                                <Text style={styles.coinSourceCardSub}>all tasks combined</Text>
+                                            </View>
+                                            <View style={styles.coinSourceCard}>
+                                                <Text style={styles.coinSourceCardLabel}>💼 Wallet Balance</Text>
+                                                <Text style={[styles.coinSourceCardVal, { color: "#22c55e" }]}>{currentBal}</Text>
+                                                <Text style={styles.coinSourceCardSub}>current coins</Text>
+                                            </View>
+                                        </View>
+
+                                        {/* 🛡️ Coin Integrity Verdict */}
+                                        {isSuspicious ? (
+                                            <View style={styles.fraudAlertBadge}>
+                                                <MaterialCommunityIcons name="alert-octagon" size={17} color="#ef4444" style={{ marginRight: 6 }} />
+                                                <Text style={styles.fraudAlertText}>
+                                                    ⚠️ Coin Discrepancy: Wallet ({currentBal}) + Withdrawn ({totalPaid}) exceeds task earnings ({totalEarned}) by {unaccounted} coins!
+                                                </Text>
+                                            </View>
+                                        ) : (
+                                            <View style={styles.verifiedBadge}>
+                                                <MaterialCommunityIcons name="check-decagram" size={17} color="#10b981" style={{ marginRight: 6 }} />
+                                                <Text style={styles.verifiedBadgeText}>
+                                                    ✅ All Coins Verified: Every coin accounted for through verified ad watches and task activities.
+                                                </Text>
+                                            </View>
+                                        )}
+
+                                        {/* Filter Chips */}
+                                        <View style={styles.filterRow}>
+                                            <TouchableOpacity
+                                                style={[styles.filterChip, coinFilter === "all" && styles.filterChipActive]}
+                                                onPress={() => setCoinFilter("all")}
+                                            >
+                                                <Text style={[styles.filterChipText, coinFilter === "all" && styles.filterChipTextActive]}>
+                                                    All ({activeTx.length})
+                                                </Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={[styles.filterChip, coinFilter === "watch" && styles.filterChipActive]}
+                                                onPress={() => setCoinFilter("watch")}
+                                            >
+                                                <Text style={[styles.filterChipText, coinFilter === "watch" && styles.filterChipTextActive]}>
+                                                    📺 Watch Ads ({watchCount})
+                                                </Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={[styles.filterChip, coinFilter === "daily" && styles.filterChipActive]}
+                                                onPress={() => setCoinFilter("daily")}
+                                            >
+                                                <Text style={[styles.filterChipText, coinFilter === "daily" && styles.filterChipTextActive]}>
+                                                    🎁 Daily Spin ({dailyBonusCount})
+                                                </Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={[styles.filterChip, coinFilter === "quiz" && styles.filterChipActive]}
+                                                onPress={() => setCoinFilter("quiz")}
+                                            >
+                                                <Text style={[styles.filterChipText, coinFilter === "quiz" && styles.filterChipTextActive]}>
+                                                    🧠 Quiz ({quizCount})
+                                                </Text>
+                                            </TouchableOpacity>
+                                        </View>
+
+                                        {/* Full Transaction History Ledger */}
+                                        <Text style={styles.fraudListHeader}>
+                                            Coin Transactions Ledger ({filteredTx.length})
+                                        </Text>
+
+                                        {loadingTx ? (
+                                            <ActivityIndicator size="small" color="#38bdf8" style={{ marginVertical: 20 }} />
+                                        ) : filteredTx.length === 0 ? (
+                                            <View style={styles.emptyFraudBox}>
+                                                <MaterialCommunityIcons name="information-outline" size={36} color="#64748b" />
+                                                <Text style={styles.emptyFraudText}>No coin transactions found for this filter.</Text>
+                                            </View>
+                                        ) : (
+                                            filteredTx.map((t, idx) => {
+                                                const typeStr = (t.transaction_type || "").toLowerCase();
+                                                const descStr = (t.description || "").toLowerCase();
+                                                const amt = parseInt(t.amount) || 0;
+                                                const isPositive = amt >= 0;
+
+                                                let icon = "🪙";
+                                                if (typeStr.includes("ad") || descStr.includes("watched")) icon = "📺";
+                                                else if (typeStr.includes("daily") || descStr.includes("spin")) icon = "🎁";
+                                                else if (typeStr.includes("quiz")) icon = "🧠";
+                                                else if (typeStr.includes("refund")) icon = "↩️";
+                                                else if (typeStr.includes("admin")) icon = "⚙️";
+                                                else if (typeStr.includes("withdraw")) icon = "💸";
+
+                                                return (
+                                                    <View key={t.id || idx} style={styles.txCard}>
+                                                        <View style={styles.txCardHeader}>
+                                                            <View style={{ flexDirection: "row", alignItems: "center", flex: 1, marginRight: 8 }}>
+                                                                <Text style={{ fontSize: 16, marginRight: 8 }}>{icon}</Text>
+                                                                <View style={{ flex: 1 }}>
+                                                                    <Text style={styles.txCardTitle} numberOfLines={1}>
+                                                                        {t.description || t.transaction_type || "Coin Transaction"}
+                                                                    </Text>
+                                                                    <Text style={styles.txCardDate}>
+                                                                        {t.created_at ? new Date(t.created_at).toLocaleString() : "N/A"}
+                                                                    </Text>
+                                                                </View>
+                                                            </View>
+                                                            <View style={{ alignItems: "flex-end" }}>
+                                                                <Text style={[styles.txCardAmount, { color: isPositive ? "#10b981" : "#ef4444" }]}>
+                                                                    {isPositive ? `+${amt}` : amt}
+                                                                </Text>
+                                                                {t.balance_after !== undefined && (
+                                                                    <Text style={styles.txCardBalance}>Bal: {t.balance_after}</Text>
+                                                                )}
+                                                            </View>
+                                                        </View>
+                                                    </View>
+                                                );
+                                            })
+                                        )}
+                                    </ScrollView>
+                                );
+                            })()
+                        ) : (
+                            <ScrollView style={styles.fraudScroll} showsVerticalScrollIndicator={true} contentContainerStyle={{ paddingBottom: 25 }}>
+                                {/* User Risk Overview Box */}
+                                <View style={styles.fraudOverviewBox}>
+                                    <View style={styles.fraudOverviewRow}>
+                                        <Text style={styles.fraudOverviewLabel}>Current Wallet:</Text>
+                                        <Text style={styles.fraudOverviewVal}>🪙 {selectedUserForFraud?.walletBalance || 0} Coins</Text>
+                                    </View>
+                                    <View style={styles.fraudOverviewRow}>
+                                        <Text style={styles.fraudOverviewLabel}>Total Paid Coins:</Text>
+                                        <Text style={[styles.fraudOverviewVal, { color: "#10b981" }]}>
+                                            🪙 {selectedUserForFraud?.withdrawStats?.totalPaidCoins || 0} Coins
+                                        </Text>
+                                    </View>
+                                    <View style={styles.fraudOverviewRow}>
+                                        <Text style={styles.fraudOverviewLabel}>Primary UPI / PayPal:</Text>
+                                        <Text style={styles.fraudOverviewVal} numberOfLines={1}>{selectedUserForFraud?.upi || "N/A"}</Text>
+                                    </View>
+                                    {selectedUserForFraud?.withdrawStats?.multiUpiCount > 1 && (
+                                        <View style={[styles.fraudAlertBadge, { marginTop: 6 }]}>
+                                            <MaterialCommunityIcons name="alert" size={14} color="#ef4444" style={{ marginRight: 4 }} />
+                                            <Text style={styles.fraudAlertText}>
+                                                Multi-Account Warning: Requested payouts to {selectedUserForFraud.withdrawStats.multiUpiCount} different UPI/PayPal accounts!
+                                            </Text>
+                                        </View>
+                                    )}
+                                </View>
+
+                                {/* Withdrawal Transactions List */}
+                                <Text style={styles.fraudListHeader}>
+                                    All Withdrawal Requests ({selectedUserForFraud?.withdrawals?.length || 0})
+                                </Text>
+
+                                {(!selectedUserForFraud?.withdrawals || selectedUserForFraud.withdrawals.length === 0) ? (
+                                    <View style={styles.emptyFraudBox}>
+                                        <MaterialCommunityIcons name="check-circle-outline" size={40} color="#64748b" />
+                                        <Text style={styles.emptyFraudText}>No withdrawal requests on record for this user.</Text>
+                                    </View>
+                                ) : (
+                                    selectedUserForFraud.withdrawals.map((w, index) => {
+                                        const isPaid = w.status === "Paid";
+                                        const isPending = w.status === "Pending";
+                                        const statusColor = isPaid ? "#10b981" : (isPending ? "#f59e0b" : "#ef4444");
+
+                                        return (
+                                            <View key={w.id || index} style={styles.fraudHistoryCard}>
+                                                <View style={styles.fraudHistoryCardHeader}>
+                                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                                                        <Text style={styles.fraudCoinsText}>🪙 {w.coins} Coins</Text>
+                                                        {w.rupees && (
+                                                            <Text style={styles.fraudRupeesText}>(₹{w.rupees})</Text>
+                                                        )}
+                                                    </View>
+                                                    <View style={[styles.fraudStatusBadge, { backgroundColor: `${statusColor}22`, borderColor: statusColor }]}>
+                                                        <Text style={[styles.fraudStatusText, { color: statusColor }]}>
+                                                            {w.status || "Pending"}
+                                                        </Text>
+                                                    </View>
+                                                </View>
+
+                                                <View style={styles.divider} />
+
+                                                <View style={styles.infoLine}>
+                                                    <Text style={styles.detail}>Payout To:</Text>
+                                                    <Text style={[styles.detail, { color: "#fff", fontWeight: "bold", flex: 1, textAlign: "right" }]}>
+                                                        {w.upi || "N/A"}
+                                                    </Text>
+                                                </View>
+
+                                                <View style={styles.infoLine}>
+                                                    <Text style={styles.detail}>Date:</Text>
+                                                    <Text style={[styles.detail, { color: "#94a3b8" }]}>
+                                                        {w.date || (w.timestamp ? new Date(w.timestamp).toLocaleString() : "N/A")}
+                                                    </Text>
+                                                </View>
+
+                                                {w.utrId ? (
+                                                    <View style={styles.infoLine}>
+                                                        <Text style={[styles.detail, { color: "#38bdf8", fontWeight: "600" }]}>
+                                                            UTR / Ref ID: {w.utrId}
+                                                        </Text>
+                                                        <TouchableOpacity onPress={() => copyToClipboard(w.utrId, "UTR ID")}>
+                                                            <Text style={styles.copyLabel}>Copy</Text>
+                                                        </TouchableOpacity>
+                                                    </View>
+                                                ) : null}
+
+                                                {w.paidAt ? (
+                                                    <Text style={[styles.detail, { color: "#22c55e", fontSize: 11, marginTop: 2 }]}>
+                                                        Paid Timestamp: {new Date(w.paidAt).toLocaleString()}
+                                                    </Text>
+                                                ) : null}
+
+                                                {w.rejectReason ? (
+                                                    <Text style={[styles.detail, { color: "#ef4444", fontSize: 11, marginTop: 2 }]}>
+                                                        Reason: {w.rejectReason}
+                                                    </Text>
+                                                ) : null}
+
+                                                {/* Quick Actions if Pending */}
+                                                {isPending && (
+                                                    <View style={[styles.actionRow, { marginTop: 10 }]}>
+                                                        <TouchableOpacity
+                                                            style={styles.paidBtn}
+                                                            onPress={() => {
+                                                                setSelectedUserForFraud(null);
+                                                                handleMarkAsPaid(w);
+                                                            }}
+                                                        >
+                                                            <Text style={styles.btnText}>Mark Paid</Text>
+                                                        </TouchableOpacity>
+                                                        <TouchableOpacity
+                                                            style={styles.rejectBtn}
+                                                            onPress={() => {
+                                                                setSelectedUserForFraud(null);
+                                                                handleMarkWrongDetails(w);
+                                                            }}
+                                                        >
+                                                            <Text style={styles.btnText}>Wrong Details</Text>
+                                                        </TouchableOpacity>
+                                                    </View>
+                                                )}
+                                            </View>
+                                        );
+                                    })
+                                )}
                             </ScrollView>
                         )}
                     </View>
@@ -2020,5 +2435,235 @@ const styles = StyleSheet.create({
     fraudStatusText: {
         fontSize: 11,
         fontWeight: "bold",
+    },
+
+    // 🪙 Coin Earnings & Watch History Breakdown Styles
+    coinEarningsSummaryBox: {
+        backgroundColor: "#0d1829",
+        borderRadius: 10,
+        padding: 10,
+        marginTop: 8,
+        marginBottom: 8,
+        borderWidth: 1,
+        borderColor: "rgba(56, 189, 248, 0.2)",
+    },
+    coinEarningsHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 6,
+    },
+    coinEarningsTitle: {
+        color: "#38bdf8",
+        fontSize: 12,
+        fontWeight: "bold",
+    },
+    totalEarnedLabel: {
+        color: "#94a3b8",
+        fontSize: 11,
+    },
+    coinGrid: {
+        flexDirection: "row",
+        gap: 6,
+    },
+    coinGridItem: {
+        flex: 1,
+        backgroundColor: "#0f172a",
+        borderRadius: 6,
+        padding: 6,
+        alignItems: "center",
+        borderWidth: 1,
+        borderColor: "#334155",
+    },
+    coinGridLabel: {
+        color: "#94a3b8",
+        fontSize: 10,
+    },
+    coinGridValue: {
+        color: "#fff",
+        fontSize: 13,
+        fontWeight: "bold",
+        marginVertical: 1,
+    },
+    coinGridSub: {
+        color: "#64748b",
+        fontSize: 9,
+        textAlign: "center",
+    },
+
+    // Modal Tab Bar
+    modalTabBar: {
+        flexDirection: "row",
+        backgroundColor: "#0f172a",
+        borderRadius: 10,
+        padding: 4,
+        marginVertical: 10,
+        borderWidth: 1,
+        borderColor: "#334155",
+    },
+    modalTabBtn: {
+        flex: 1,
+        paddingVertical: 8,
+        borderRadius: 8,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    modalTabBtnActive: {
+        backgroundColor: "#2563eb",
+    },
+    modalTabBtnText: {
+        color: "#94a3b8",
+        fontSize: 12,
+        fontWeight: "600",
+    },
+    modalTabBtnTextActive: {
+        color: "#fff",
+        fontWeight: "bold",
+    },
+
+    // Watch Ads Hero Banner
+    watchHeroCard: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        backgroundColor: "rgba(14, 165, 233, 0.12)",
+        borderWidth: 1.5,
+        borderColor: "#38bdf8",
+        borderRadius: 12,
+        padding: 14,
+        marginBottom: 10,
+    },
+    watchHeroLeft: {
+        flexDirection: "row",
+        alignItems: "center",
+        flex: 1,
+    },
+    watchHeroTitle: {
+        color: "#fff",
+        fontSize: 14,
+        fontWeight: "bold",
+    },
+    watchHeroSub: {
+        color: "#38bdf8",
+        fontSize: 11,
+        marginTop: 2,
+    },
+    watchHeroCoins: {
+        color: "#38bdf8",
+        fontSize: 18,
+        fontWeight: "900",
+    },
+
+    // Sources Grid
+    coinSourcesGrid: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 8,
+        marginBottom: 10,
+    },
+    coinSourceCard: {
+        width: "48.5%",
+        backgroundColor: "#0f172a",
+        borderRadius: 10,
+        padding: 10,
+        borderWidth: 1,
+        borderColor: "#334155",
+    },
+    coinSourceCardLabel: {
+        color: "#94a3b8",
+        fontSize: 11,
+        fontWeight: "600",
+        marginBottom: 4,
+    },
+    coinSourceCardVal: {
+        fontSize: 16,
+        fontWeight: "bold",
+    },
+    coinSourceCardSub: {
+        color: "#64748b",
+        fontSize: 10,
+        marginTop: 2,
+    },
+
+    // Verified Badge
+    verifiedBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "rgba(16, 185, 129, 0.12)",
+        borderWidth: 1,
+        borderColor: "rgba(16, 185, 129, 0.4)",
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        borderRadius: 8,
+        marginBottom: 10,
+    },
+    verifiedBadgeText: {
+        color: "#10b981",
+        fontSize: 11,
+        fontWeight: "700",
+        flex: 1,
+    },
+
+    // Filter Chips Row
+    filterRow: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 6,
+        marginBottom: 10,
+    },
+    filterChip: {
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 16,
+        backgroundColor: "#0f172a",
+        borderWidth: 1,
+        borderColor: "#334155",
+    },
+    filterChipActive: {
+        backgroundColor: "#38bdf8",
+        borderColor: "#38bdf8",
+    },
+    filterChipText: {
+        color: "#94a3b8",
+        fontSize: 11,
+        fontWeight: "600",
+    },
+    filterChipTextActive: {
+        color: "#0a0f1f",
+        fontWeight: "bold",
+    },
+
+    // Transaction Card
+    txCard: {
+        backgroundColor: "#0f172a",
+        borderRadius: 8,
+        padding: 10,
+        marginBottom: 6,
+        borderWidth: 1,
+        borderColor: "#1e293b",
+    },
+    txCardHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+    },
+    txCardTitle: {
+        color: "#fff",
+        fontSize: 12,
+        fontWeight: "600",
+    },
+    txCardDate: {
+        color: "#64748b",
+        fontSize: 10,
+        marginTop: 2,
+    },
+    txCardAmount: {
+        fontSize: 13,
+        fontWeight: "bold",
+    },
+    txCardBalance: {
+        color: "#94a3b8",
+        fontSize: 10,
+        marginTop: 1,
     }
 });
